@@ -218,6 +218,7 @@ pub trait Pane {
         client_id: ClientId,
         frame_params: FrameParams,
         input_mode: InputMode,
+        palette: Palette,
     ) -> Result<Option<(Vec<CharacterChunk>, Option<String>)>>; // TODO: better
     fn render_fake_cursor(
         &mut self,

@@ -223,7 +223,7 @@ impl<'a> PaneContentsAndUi<'a> {
 
         if let Some((frame_terminal_characters, vte_output)) = self
             .pane
-            .render_frame(client_id, frame_params, client_mode)
+            .render_frame(client_id, frame_params, client_mode, self.style.colors)
             .with_context(err_context)?
         {
             self.output

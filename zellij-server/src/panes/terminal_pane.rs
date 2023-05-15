@@ -311,6 +311,7 @@ impl Pane for TerminalPane {
         client_id: ClientId,
         frame_params: FrameParams,
         input_mode: InputMode,
+        palette: Palette,
     ) -> Result<Option<(Vec<CharacterChunk>, Option<String>)>> {
         let err_context = || format!("failed to render frame for client {client_id}");
         // TODO: remove the cursor stuff from here
@@ -375,6 +376,10 @@ impl Pane for TerminalPane {
         }
         if let Some((frame_color_override, _text)) = self.pane_frame_color_override.as_ref() {
             frame.override_color(*frame_color_override);
+        }
+
+        if (input_mode == InputMode::Locked) {
+            frame.override_color(palette.bg);
         }
 
         let res = match self.frame.get(&client_id) {

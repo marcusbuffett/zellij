@@ -263,6 +263,7 @@ impl Pane for PluginPane {
         client_id: ClientId,
         frame_params: FrameParams,
         input_mode: InputMode,
+        palette: Palette,
     ) -> Result<Option<(Vec<CharacterChunk>, Option<String>)>> {
         if self.borderless {
             return Ok(None);
