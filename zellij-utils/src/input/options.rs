@@ -124,6 +124,61 @@ pub struct Options {
     #[clap(long, value_parser)]
     #[serde(default)]
     pub auto_layout: Option<bool>,
+
+    /// Whether sessions should be serialized to the HD so that they can be later resurrected,
+    /// default is true
+    #[clap(long, value_parser)]
+    #[serde(default)]
+    pub session_serialization: Option<bool>,
+
+    /// Whether pane viewports are serialized along with the session, default is false
+    #[clap(long, value_parser)]
+    #[serde(default)]
+    pub serialize_pane_viewport: Option<bool>,
+
+    /// Scrollback lines to serialize along with the pane viewport when serializing sessions, 0
+    /// defaults to the scrollback size. If this number is higher than the scrollback size, it will
+    /// also default to the scrollback size
+    #[clap(long, value_parser)]
+    #[serde(default)]
+    pub scrollback_lines_to_serialize: Option<usize>,
+
+    /// Whether to use ANSI styled underlines
+    #[clap(long, value_parser)]
+    #[serde(default)]
+    pub styled_underlines: Option<bool>,
+
+    /// The interval at which to serialize sessions for resurrection (in seconds)
+    #[clap(long, value_parser)]
+    pub serialization_interval: Option<u64>,
+
+    /// If true, will disable writing session metadata to disk
+    #[clap(long, value_parser)]
+    pub disable_session_metadata: Option<bool>,
+
+    /// Whether to enable support for the Kitty keyboard protocol (must also be supported by the
+    /// host terminal), defaults to true if the terminal supports it
+    #[clap(long, value_parser)]
+    #[serde(default)]
+    pub support_kitty_keyboard_protocol: Option<bool>,
+
+    /// Whether to stack panes when resizing beyond a certain size
+    /// default is true
+    #[clap(long, value_parser)]
+    #[serde(default)]
+    pub stacked_resize: Option<bool>,
+
+    /// Whether to show startup tips when starting a new session
+    /// default is true
+    #[clap(long, value_parser)]
+    #[serde(default)]
+    pub show_startup_tips: Option<bool>,
+
+    /// Whether to show release notes on first run of a new version
+    /// default is true
+    #[clap(long, value_parser)]
+    #[serde(default)]
+    pub show_release_notes: Option<bool>,
 }
 
 #[derive(ArgEnum, Deserialize, Serialize, Debug, Clone, Copy, PartialEq)]
@@ -187,6 +242,24 @@ impl Options {
         let attach_to_session = other
             .attach_to_session
             .or_else(|| self.attach_to_session.clone());
+        let session_serialization = other.session_serialization.or(self.session_serialization);
+        let serialize_pane_viewport = other
+            .serialize_pane_viewport
+            .or(self.serialize_pane_viewport);
+        let scrollback_lines_to_serialize = other
+            .scrollback_lines_to_serialize
+            .or(self.scrollback_lines_to_serialize);
+        let styled_underlines = other.styled_underlines.or(self.styled_underlines);
+        let serialization_interval = other.serialization_interval.or(self.serialization_interval);
+        let disable_session_metadata = other
+            .disable_session_metadata
+            .or(self.disable_session_metadata);
+        let support_kitty_keyboard_protocol = other
+            .support_kitty_keyboard_protocol
+            .or(self.support_kitty_keyboard_protocol);
+        let stacked_resize = other.stacked_resize.or(self.stacked_resize);
+        let show_startup_tips = other.show_startup_tips.or(self.show_startup_tips);
+        let show_release_notes = other.show_release_notes.or(self.show_release_notes);
 
         Options {
             simplified_ui,
@@ -209,6 +282,16 @@ impl Options {
             session_name,
             attach_to_session,
             auto_layout,
+            session_serialization,
+            serialize_pane_viewport,
+            scrollback_lines_to_serialize,
+            styled_underlines,
+            serialization_interval,
+            disable_session_metadata,
+            support_kitty_keyboard_protocol,
+            stacked_resize,
+            show_startup_tips,
+            show_release_notes,
         }
     }
 
@@ -232,6 +315,10 @@ impl Options {
         let pane_frames = merge_bool(other.pane_frames, self.pane_frames);
         let auto_layout = merge_bool(other.auto_layout, self.auto_layout);
         let mirror_session = merge_bool(other.mirror_session, self.mirror_session);
+        let session_serialization =
+            merge_bool(other.session_serialization, self.session_serialization);
+        let serialize_pane_viewport =
+            merge_bool(other.serialize_pane_viewport, self.serialize_pane_viewport);
 
         let default_mode = other.default_mode.or(self.default_mode);
         let default_shell = other.default_shell.or_else(|| self.default_shell.clone());
@@ -252,6 +339,20 @@ impl Options {
         let attach_to_session = other
             .attach_to_session
             .or_else(|| self.attach_to_session.clone());
+        let scrollback_lines_to_serialize = other
+            .scrollback_lines_to_serialize
+            .or_else(|| self.scrollback_lines_to_serialize.clone());
+        let styled_underlines = other.styled_underlines.or(self.styled_underlines);
+        let serialization_interval = other.serialization_interval.or(self.serialization_interval);
+        let disable_session_metadata = other
+            .disable_session_metadata
+            .or(self.disable_session_metadata);
+        let support_kitty_keyboard_protocol = other
+            .support_kitty_keyboard_protocol
+            .or(self.support_kitty_keyboard_protocol);
+        let stacked_resize = other.stacked_resize.or(self.stacked_resize);
+        let show_startup_tips = other.show_startup_tips.or(self.show_startup_tips);
+        let show_release_notes = other.show_release_notes.or(self.show_release_notes);
 
         Options {
             simplified_ui,
@@ -274,6 +375,16 @@ impl Options {
             session_name,
             attach_to_session,
             auto_layout,
+            session_serialization,
+            serialize_pane_viewport,
+            scrollback_lines_to_serialize,
+            styled_underlines,
+            serialization_interval,
+            disable_session_metadata,
+            support_kitty_keyboard_protocol,
+            stacked_resize,
+            show_startup_tips,
+            show_release_notes,
         }
     }
 
@@ -333,6 +444,15 @@ impl From<CliOptions> for Options {
             session_name: opts.session_name,
             attach_to_session: opts.attach_to_session,
             auto_layout: opts.auto_layout,
+            session_serialization: opts.session_serialization,
+            serialize_pane_viewport: opts.serialize_pane_viewport,
+            scrollback_lines_to_serialize: opts.scrollback_lines_to_serialize,
+            styled_underlines: opts.styled_underlines,
+            serialization_interval: opts.serialization_interval,
+            support_kitty_keyboard_protocol: opts.support_kitty_keyboard_protocol,
+            stacked_resize: opts.stacked_resize,
+            show_release_notes: opts.show_release_notes,
+            show_startup_tips: opts.show_startup_tips,
             ..Default::default()
         }
     }

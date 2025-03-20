@@ -14,9 +14,13 @@ use std::fmt::Debug;
 use std::rc::Rc;
 use std::time::{self, Instant};
 use zellij_utils::input::command::RunCommand;
+use zellij_utils::input::mouse::{MouseEvent, MouseEventType};
 use zellij_utils::pane_size::Offset;
 use zellij_utils::{
-    data::{InputMode, Palette, PaletteColor, Style},
+    data::{
+        BareKey, InputMode, KeyWithModifier, Palette, PaletteColor, PaneId as ZellijUtilsPaneId,
+        Style, Styling,
+    },
     errors::prelude::*,
     input::layout::Run,
     pane_size::PaneGeom,
@@ -37,9 +41,10 @@ const UP_ARROW: &[u8] = &[27, 91, 65];
 const DOWN_ARROW: &[u8] = &[27, 91, 66];
 const HOME_KEY: &[u8] = &[27, 91, 72];
 const END_KEY: &[u8] = &[27, 91, 70];
-const BRACKETED_PASTE_BEGIN: &[u8] = &[27, 91, 50, 48, 48, 126];
-const BRACKETED_PASTE_END: &[u8] = &[27, 91, 50, 48, 49, 126];
+pub const BRACKETED_PASTE_BEGIN: &[u8] = &[27, 91, 50, 48, 48, 126];
+pub const BRACKETED_PASTE_END: &[u8] = &[27, 91, 50, 48, 49, 126];
 const ENTER_NEWLINE: &[u8] = &[10];
+const ESC: &[u8] = &[27];
 const ENTER_CARRIAGE_RETURN: &[u8] = &[13];
 const SPACE: &[u8] = &[32];
 const CTRL_C: &[u8] = &[3]; // TODO: check this to be sure it fits all types of CTRL_C (with mac, etc)
@@ -84,6 +89,25 @@ pub enum PaneId {
     Plugin(u32), // FIXME: Drop the trait object, make this a wrapper for the struct?
 }
 
+// because crate architecture and reasons...
+impl From<ZellijUtilsPaneId> for PaneId {
+    fn from(zellij_utils_pane_id: ZellijUtilsPaneId) -> Self {
+        match zellij_utils_pane_id {
+            ZellijUtilsPaneId::Terminal(id) => PaneId::Terminal(id),
+            ZellijUtilsPaneId::Plugin(id) => PaneId::Plugin(id),
+        }
+    }
+}
+
+impl Into<ZellijUtilsPaneId> for PaneId {
+    fn into(self) -> ZellijUtilsPaneId {
+        match self {
+            PaneId::Terminal(id) => ZellijUtilsPaneId::Terminal(id),
+            PaneId::Plugin(id) => ZellijUtilsPaneId::Plugin(id),
+        }
+    }
+}
+
 type IsFirstRun = bool;
 
 // FIXME: This should hold an os_api handle so that terminal panes can set their own size via FD in
@@ -114,6 +138,8 @@ pub struct TerminalPane {
     // held on startup and can possibly be used to display some errors
     pane_frame_color_override: Option<(PaletteColor, Option<String>)>,
     invoked_with: Option<Run>,
+    #[allow(dead_code)]
+    arrow_fonts: bool,
 }
 
 impl Pane for TerminalPane {
@@ -152,7 +178,9 @@ impl Pane for TerminalPane {
         self.reflow_lines();
     }
     fn set_geom(&mut self, position_and_size: PaneGeom) {
+        let is_pinned = self.geom.is_pinned;
         self.geom = position_and_size;
+        self.geom.is_pinned = is_pinned;
         self.reflow_lines();
         self.render_full_viewport();
     }
@@ -177,83 +205,76 @@ impl Pane for TerminalPane {
             .cursor_coordinates()
             .map(|(x, y)| (x + left, y + top))
     }
-    fn adjust_input_to_terminal(&mut self, input_bytes: Vec<u8>) -> Option<AdjustedInput> {
+    fn is_mid_frame(&self) -> bool {
+        self.grid.is_mid_frame()
+    }
+    fn adjust_input_to_terminal(
+        &mut self,
+        key_with_modifier: &Option<KeyWithModifier>,
+        raw_input_bytes: Vec<u8>,
+        raw_input_bytes_are_kitty: bool,
+        _client_id: Option<ClientId>,
+    ) -> Option<AdjustedInput> {
         // there are some cases in which the terminal state means that input sent to it
         // needs to be adjusted.
         // here we match against those cases - if need be, we adjust the input and if not
         // we send back the original input
-        if let Some((_exit_status, _is_first_run, run_command)) = &self.is_held {
-            match input_bytes.as_slice() {
-                ENTER_CARRIAGE_RETURN | ENTER_NEWLINE | SPACE => {
-                    let run_command = run_command.clone();
-                    self.is_held = None;
-                    self.grid.reset_terminal_state();
-                    self.set_should_render(true);
-                    self.remove_banner();
-                    Some(AdjustedInput::ReRunCommandInThisPane(run_command))
+
+        self.reset_selection();
+        if !self.grid.bracketed_paste_mode {
+            // Zellij itself operates in bracketed paste mode, so the terminal sends these
+            // instructions (bracketed paste start and bracketed paste end respectively)
+            // when pasting input. We only need to make sure not to send them to terminal
+            // panes who do not work in this mode
+            match raw_input_bytes.as_slice() {
+                BRACKETED_PASTE_BEGIN | BRACKETED_PASTE_END => {
+                    return Some(AdjustedInput::WriteBytesToTerminal(vec![]))
                 },
-                CTRL_C => Some(AdjustedInput::CloseThisPane),
-                _ => None,
+                _ => {},
             }
-        } else {
-            if self.grid.new_line_mode {
-                if let &[13] = input_bytes.as_slice() {
-                    // LNM - carriage return is followed by linefeed
-                    return Some(AdjustedInput::WriteBytesToTerminal(
-                        "\u{0d}\u{0a}".as_bytes().to_vec(),
-                    ));
-                };
-            }
-            if self.grid.cursor_key_mode {
-                match input_bytes.as_slice() {
-                    LEFT_ARROW => {
-                        return Some(AdjustedInput::WriteBytesToTerminal(
-                            AnsiEncoding::Left.as_vec_bytes(),
-                        ));
-                    },
-                    RIGHT_ARROW => {
-                        return Some(AdjustedInput::WriteBytesToTerminal(
-                            AnsiEncoding::Right.as_vec_bytes(),
-                        ));
-                    },
-                    UP_ARROW => {
-                        return Some(AdjustedInput::WriteBytesToTerminal(
-                            AnsiEncoding::Up.as_vec_bytes(),
-                        ));
-                    },
-                    DOWN_ARROW => {
-                        return Some(AdjustedInput::WriteBytesToTerminal(
-                            AnsiEncoding::Down.as_vec_bytes(),
-                        ));
-                    },
+        }
 
-                    HOME_KEY => {
-                        return Some(AdjustedInput::WriteBytesToTerminal(
-                            AnsiEncoding::Home.as_vec_bytes(),
-                        ));
-                    },
-                    END_KEY => {
-                        return Some(AdjustedInput::WriteBytesToTerminal(
-                            AnsiEncoding::End.as_vec_bytes(),
-                        ));
-                    },
-                    _ => {},
-                };
-            }
-
-            if !self.grid.bracketed_paste_mode {
-                // Zellij itself operates in bracketed paste mode, so the terminal sends these
-                // instructions (bracketed paste start and bracketed paste end respectively)
-                // when pasting input. We only need to make sure not to send them to terminal
-                // panes who do not work in this mode
-                match input_bytes.as_slice() {
-                    BRACKETED_PASTE_BEGIN | BRACKETED_PASTE_END => {
-                        return Some(AdjustedInput::WriteBytesToTerminal(vec![]))
-                    },
-                    _ => {},
+        if self.is_held.is_some() {
+            if key_with_modifier
+                .as_ref()
+                .map(|k| k.is_key_without_modifier(BareKey::Enter))
+                .unwrap_or(false)
+            {
+                self.handle_held_run()
+            } else if key_with_modifier
+                .as_ref()
+                .map(|k| k.is_key_without_modifier(BareKey::Esc))
+                .unwrap_or(false)
+            {
+                self.handle_held_drop_to_shell()
+            } else if key_with_modifier
+                .as_ref()
+                .map(|k| k.is_key_with_ctrl_modifier(BareKey::Char('c')))
+                .unwrap_or(false)
+            {
+                Some(AdjustedInput::CloseThisPane)
+            } else {
+                match raw_input_bytes.as_slice() {
+                    ENTER_CARRIAGE_RETURN | ENTER_NEWLINE | SPACE => self.handle_held_run(),
+                    ESC => self.handle_held_drop_to_shell(),
+                    CTRL_C => Some(AdjustedInput::CloseThisPane),
+                    _ => None,
                 }
             }
-            Some(AdjustedInput::WriteBytesToTerminal(input_bytes))
+        } else {
+            if self.grid.supports_kitty_keyboard_protocol {
+                self.adjust_input_to_terminal_with_kitty_keyboard_protocol(
+                    key_with_modifier,
+                    raw_input_bytes,
+                    raw_input_bytes_are_kitty,
+                )
+            } else {
+                self.adjust_input_to_terminal_without_kitty_keyboard_protocol(
+                    key_with_modifier,
+                    raw_input_bytes,
+                    raw_input_bytes_are_kitty,
+                )
+            }
         }
     }
     fn position_and_size(&self) -> PaneGeom {
@@ -361,12 +382,14 @@ impl Pane for TerminalPane {
         };
 
         let frame_geom = self.current_geom();
+        let is_pinned = frame_geom.is_pinned;
         let mut frame = PaneFrame::new(
             frame_geom.into(),
             self.grid.scrollback_position_and_length(),
             pane_title,
             frame_params,
-        );
+        )
+        .is_pinned(is_pinned);
         if let Some((exit_status, is_first_run, _run_command)) = &self.is_held {
             if *is_first_run {
                 frame.indicate_first_run();
@@ -420,8 +443,10 @@ impl Pane for TerminalPane {
                 .grid
                 .get_character_under_cursor()
                 .unwrap_or(EMPTY_TERMINAL_CHARACTER);
-            character_under_cursor.styles.background = Some(cursor_color.into());
-            character_under_cursor.styles.foreground = Some(text_color.into());
+            character_under_cursor.styles.update(|styles| {
+                styles.background = Some(cursor_color.into());
+                styles.foreground = Some(text_color.into());
+            });
             // we keep track of these so that we can clear them up later (see render function)
             self.fake_cursor_locations.insert((cursor_y, cursor_x));
             let mut fake_cursor = format!(
@@ -502,7 +527,7 @@ impl Pane for TerminalPane {
         self.geom.y -= count;
         self.reflow_lines();
     }
-    fn dump_screen(&mut self, _client_id: ClientId, full: bool) -> String {
+    fn dump_screen(&self, full: bool) -> String {
         self.grid.dump_screen(full)
     }
     fn clear_screen(&mut self) {
@@ -558,14 +583,16 @@ impl Pane for TerminalPane {
         if cursor_at_the_bottom {
             self.grid.scroll_up_one_line();
             self.selection_scrolled_at = time::Instant::now();
+            self.set_should_render(true);
         } else if cursor_at_the_top {
             self.grid.scroll_down_one_line();
             self.selection_scrolled_at = time::Instant::now();
+            self.set_should_render(true);
         } else if cursor_in_the_middle {
+            // here we'll only render if the selection was updated, and that'll be handled by the
+            // grid
             self.grid.update_selection(to);
         }
-
-        self.set_should_render(true);
     }
 
     fn end_selection(&mut self, end: &Position, _client_id: ClientId) {
@@ -588,6 +615,10 @@ impl Pane for TerminalPane {
     fn set_content_offset(&mut self, offset: Offset) {
         self.content_offset = offset;
         self.reflow_lines();
+    }
+
+    fn get_content_offset(&self) -> Offset {
+        self.content_offset
     }
 
     fn store_pane_name(&mut self) {
@@ -614,6 +645,10 @@ impl Pane for TerminalPane {
 
     fn exclude_from_sync(&self) -> bool {
         self.exclude_from_sync
+    }
+
+    fn mouse_event(&self, event: &MouseEvent, _client_id: ClientId) -> Option<String> {
+        self.grid.mouse_event_signal(event)
     }
 
     fn mouse_left_click(&self, position: &Position, is_held: bool) -> Option<String> {
@@ -702,6 +737,7 @@ impl Pane for TerminalPane {
         self.grid.is_alternate_mode_active()
     }
     fn hold(&mut self, exit_status: Option<i32>, is_first_run: bool, run_command: RunCommand) {
+        self.invoked_with = Some(Run::Command(run_command.clone()));
         self.is_held = Some((exit_status, is_first_run, run_command));
         if is_first_run {
             self.render_first_run_banner();
@@ -709,7 +745,7 @@ impl Pane for TerminalPane {
         self.set_should_render(true);
     }
     fn add_red_pane_frame_color_override(&mut self, error_text: Option<String>) {
-        self.pane_frame_color_override = Some((self.style.colors.red, error_text));
+        self.pane_frame_color_override = Some((self.style.colors.exit_code_error.base, error_text));
     }
     fn clear_pane_frame_color_override(&mut self) {
         self.pane_frame_color_override = None;
@@ -724,6 +760,122 @@ impl Pane for TerminalPane {
     }
     fn set_title(&mut self, title: String) {
         self.pane_title = title;
+    }
+    fn current_title(&self) -> String {
+        if self.pane_name.is_empty() {
+            self.grid
+                .title
+                .as_deref()
+                .unwrap_or(&self.pane_title)
+                .into()
+        } else {
+            self.pane_name.to_owned()
+        }
+    }
+    fn custom_title(&self) -> Option<String> {
+        if self.pane_name.is_empty() {
+            None
+        } else {
+            Some(self.pane_name.clone())
+        }
+    }
+    fn exit_status(&self) -> Option<i32> {
+        self.is_held
+            .as_ref()
+            .and_then(|(exit_status, _, _)| *exit_status)
+    }
+    fn is_held(&self) -> bool {
+        self.is_held.is_some()
+    }
+    fn exited(&self) -> bool {
+        match self.is_held {
+            Some((_, is_first_run, _)) => !is_first_run,
+            None => false,
+        }
+    }
+    fn rename(&mut self, buf: Vec<u8>) {
+        self.pane_name = String::from_utf8_lossy(&buf).to_string();
+        self.set_should_render(true);
+    }
+    fn serialize(&self, scrollback_lines_to_serialize: Option<usize>) -> Option<String> {
+        self.grid.serialize(scrollback_lines_to_serialize)
+    }
+    fn rerun(&mut self) -> Option<RunCommand> {
+        // if this is a command pane that has exited or is waiting to be rerun, will return its
+        // RunCommand, otherwise it is safe to assume this is not the right sort of pane or that it
+        // is not in the right sort of state
+        self.is_held.take().map(|(_, _, run_command)| {
+            self.is_held = None;
+            self.grid.reset_terminal_state();
+            self.set_should_render(true);
+            self.remove_banner();
+            run_command.clone()
+        })
+    }
+    fn update_theme(&mut self, theme: Styling) {
+        self.style.colors = theme.clone();
+        self.grid.update_theme(theme);
+        if self.banner.is_some() {
+            // we do this so that the banner will be updated with the new theme colors
+            self.render_first_run_banner();
+        }
+    }
+    fn update_arrow_fonts(&mut self, should_support_arrow_fonts: bool) {
+        self.arrow_fonts = should_support_arrow_fonts;
+        self.grid.update_arrow_fonts(should_support_arrow_fonts);
+    }
+    fn update_rounded_corners(&mut self, rounded_corners: bool) {
+        self.style.rounded_corners = rounded_corners;
+        self.frame.clear();
+    }
+    fn drain_fake_cursors(&mut self) -> Option<HashSet<(usize, usize)>> {
+        if !self.fake_cursor_locations.is_empty() {
+            for (y, _x) in &self.fake_cursor_locations {
+                // we do this because once these fake_cursor_locations
+                // have been drained, we have to make sure to render the line
+                // they appeared on so that whatever clears their location
+                // won't leave a hole
+                self.grid.update_line_for_rendering(*y);
+            }
+            Some(self.fake_cursor_locations.drain().collect())
+        } else {
+            None
+        }
+    }
+    fn toggle_pinned(&mut self) {
+        self.geom.is_pinned = !self.geom.is_pinned;
+    }
+    fn set_pinned(&mut self, should_be_pinned: bool) {
+        self.geom.is_pinned = should_be_pinned;
+    }
+    fn intercept_left_mouse_click(&mut self, position: &Position, client_id: ClientId) -> bool {
+        if self.position_is_on_frame(position) {
+            let relative_position = self.relative_position(position);
+            if let Some(client_frame) = self.frame.get_mut(&client_id) {
+                if client_frame.clicked_on_pinned(relative_position) {
+                    self.toggle_pinned();
+                    return true;
+                }
+            }
+        }
+        false
+    }
+    fn intercept_mouse_event_on_frame(&mut self, event: &MouseEvent, client_id: ClientId) -> bool {
+        if self.position_is_on_frame(&event.position) {
+            let relative_position = self.relative_position(&event.position);
+            if let MouseEventType::Press = event.event_type {
+                if let Some(client_frame) = self.frame.get_mut(&client_id) {
+                    if client_frame.clicked_on_pinned(relative_position) {
+                        self.toggle_pinned();
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+    fn reset_logical_position(&mut self) {
+        self.geom.logical_position = None;
     }
 }
 
@@ -742,6 +894,10 @@ impl TerminalPane {
         terminal_emulator_color_codes: Rc<RefCell<HashMap<usize, String>>>,
         initial_pane_title: Option<String>,
         invoked_with: Option<Run>,
+        debug: bool,
+        arrow_fonts: bool,
+        styled_underlines: bool,
+        explicitly_disable_keyboard_protocol: bool,
     ) -> TerminalPane {
         let initial_pane_title =
             initial_pane_title.unwrap_or_else(|| format!("Pane #{}", pane_index));
@@ -753,6 +909,11 @@ impl TerminalPane {
             link_handler,
             character_cell_size,
             sixel_image_store,
+            style.clone(),
+            debug,
+            arrow_fonts,
+            styled_underlines,
+            explicitly_disable_keyboard_protocol,
         );
         TerminalPane {
             frame: HashMap::new(),
@@ -777,6 +938,7 @@ impl TerminalPane {
             banner: None,
             pane_frame_color_override: None,
             invoked_with,
+            arrow_fonts,
         }
     }
     pub fn get_x(&self) -> usize {
@@ -842,6 +1004,131 @@ impl TerminalPane {
             self.set_should_render(true);
             self.banner = None;
         }
+    }
+    fn adjust_input_to_terminal_with_kitty_keyboard_protocol(
+        &self,
+        key: &Option<KeyWithModifier>,
+        raw_input_bytes: Vec<u8>,
+        raw_input_bytes_are_kitty: bool,
+    ) -> Option<AdjustedInput> {
+        if raw_input_bytes_are_kitty || key.is_none() {
+            Some(AdjustedInput::WriteBytesToTerminal(raw_input_bytes))
+        } else {
+            // here what happens is that the host terminal is operating in non "kitty keys" mode, but
+            // this terminal pane *is* operating in "kitty keys" mode - so we need to serialize the "non kitty"
+            // key to a "kitty key"
+            key.as_ref()
+                .and_then(|k| k.serialize_kitty())
+                .map(|s| AdjustedInput::WriteBytesToTerminal(s.as_bytes().to_vec()))
+        }
+    }
+    fn adjust_input_to_terminal_without_kitty_keyboard_protocol(
+        &self,
+        key: &Option<KeyWithModifier>,
+        raw_input_bytes: Vec<u8>,
+        raw_input_bytes_are_kitty: bool,
+    ) -> Option<AdjustedInput> {
+        if self.grid.new_line_mode {
+            let key_is_enter = raw_input_bytes.as_slice() == &[13]
+                || key
+                    .as_ref()
+                    .map(|k| k.is_key_without_modifier(BareKey::Enter))
+                    .unwrap_or(false);
+            if key_is_enter {
+                // LNM - carriage return is followed by linefeed
+                return Some(AdjustedInput::WriteBytesToTerminal(
+                    "\u{0d}\u{0a}".as_bytes().to_vec(),
+                ));
+            };
+        }
+        if self.grid.cursor_key_mode {
+            let key_is_left_arrow = raw_input_bytes.as_slice() == LEFT_ARROW
+                || key
+                    .as_ref()
+                    .map(|k| k.is_key_without_modifier(BareKey::Left))
+                    .unwrap_or(false);
+            let key_is_right_arrow = raw_input_bytes.as_slice() == RIGHT_ARROW
+                || key
+                    .as_ref()
+                    .map(|k| k.is_key_without_modifier(BareKey::Right))
+                    .unwrap_or(false);
+            let key_is_up_arrow = raw_input_bytes.as_slice() == UP_ARROW
+                || key
+                    .as_ref()
+                    .map(|k| k.is_key_without_modifier(BareKey::Up))
+                    .unwrap_or(false);
+            let key_is_down_arrow = raw_input_bytes.as_slice() == DOWN_ARROW
+                || key
+                    .as_ref()
+                    .map(|k| k.is_key_without_modifier(BareKey::Down))
+                    .unwrap_or(false);
+            let key_is_home_key = raw_input_bytes.as_slice() == HOME_KEY
+                || key
+                    .as_ref()
+                    .map(|k| k.is_key_without_modifier(BareKey::Home))
+                    .unwrap_or(false);
+            let key_is_end_key = raw_input_bytes.as_slice() == END_KEY
+                || key
+                    .as_ref()
+                    .map(|k| k.is_key_without_modifier(BareKey::End))
+                    .unwrap_or(false);
+            if key_is_left_arrow {
+                return Some(AdjustedInput::WriteBytesToTerminal(
+                    AnsiEncoding::Left.as_vec_bytes(),
+                ));
+            } else if key_is_right_arrow {
+                return Some(AdjustedInput::WriteBytesToTerminal(
+                    AnsiEncoding::Right.as_vec_bytes(),
+                ));
+            } else if key_is_up_arrow {
+                return Some(AdjustedInput::WriteBytesToTerminal(
+                    AnsiEncoding::Up.as_vec_bytes(),
+                ));
+            } else if key_is_down_arrow {
+                return Some(AdjustedInput::WriteBytesToTerminal(
+                    AnsiEncoding::Down.as_vec_bytes(),
+                ));
+            } else if key_is_home_key {
+                return Some(AdjustedInput::WriteBytesToTerminal(
+                    AnsiEncoding::Home.as_vec_bytes(),
+                ));
+            } else if key_is_end_key {
+                return Some(AdjustedInput::WriteBytesToTerminal(
+                    AnsiEncoding::End.as_vec_bytes(),
+                ));
+            }
+        }
+        if raw_input_bytes_are_kitty {
+            // here what happens is that the host terminal is operating in "kitty keys" mode, but
+            // this terminal pane is not - so we need to serialize the kitty key to "non kitty" if
+            // possible - if not possible (eg. with multiple modifiers), we'll return a None here
+            // and write nothing to the terminal pane
+            key.as_ref()
+                .and_then(|k| k.serialize_non_kitty())
+                .map(|s| AdjustedInput::WriteBytesToTerminal(s.as_bytes().to_vec()))
+        } else {
+            Some(AdjustedInput::WriteBytesToTerminal(raw_input_bytes))
+        }
+    }
+    fn handle_held_run(&mut self) -> Option<AdjustedInput> {
+        self.is_held.take().map(|(_, _, run_command)| {
+            self.is_held = None;
+            self.grid.reset_terminal_state();
+            self.set_should_render(true);
+            self.remove_banner();
+            AdjustedInput::ReRunCommandInThisPane(run_command.clone())
+        })
+    }
+    fn handle_held_drop_to_shell(&mut self) -> Option<AdjustedInput> {
+        self.is_held.take().map(|(_, _, run_command)| {
+            // Drop to shell in the same working directory as the command was run
+            let working_dir = run_command.cwd.clone();
+            self.is_held = None;
+            self.grid.reset_terminal_state();
+            self.set_should_render(true);
+            self.remove_banner();
+            AdjustedInput::DropToShellInThisPane { working_dir }
+        })
     }
 }
 

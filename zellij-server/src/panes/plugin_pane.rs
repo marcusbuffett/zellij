@@ -1,11 +1,16 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::time::Instant;
 
 use crate::output::{CharacterChunk, SixelImageChunk};
-use crate::panes::{grid::Grid, sixel::SixelImageStore, LinkHandler, PaneId};
+use crate::panes::{
+    grid::Grid,
+    sixel::SixelImageStore,
+    terminal_pane::{BRACKETED_PASTE_BEGIN, BRACKETED_PASTE_END},
+    LinkHandler, PaneId,
+};
 use crate::plugins::PluginInstruction;
 use crate::pty::VteBytes;
-use crate::tab::Pane;
+use crate::tab::{AdjustedInput, Pane};
 use crate::ui::{
     loading_indication::LoadingIndication,
     pane_boundaries_frame::{FrameParams, PaneFrame},
@@ -13,22 +18,36 @@ use crate::ui::{
 use crate::ClientId;
 use std::cell::RefCell;
 use std::rc::Rc;
+use zellij_utils::data::{
+    BareKey, KeyWithModifier, PermissionStatus, PermissionType, PluginPermission,
+};
 use zellij_utils::pane_size::{Offset, SizeInPixels};
 use zellij_utils::position::Position;
 use zellij_utils::{
     channels::SenderWithContext,
-    data::{Event, InputMode, Mouse, Palette, PaletteColor, Style},
+    data::{Event, InputMode, Mouse, Palette, PaletteColor, Style, Styling},
     errors::prelude::*,
     input::layout::Run,
+    input::mouse::{MouseEvent, MouseEventType},
     pane_size::PaneGeom,
     shared::make_terminal_title,
     vte,
 };
 
+macro_rules! style {
+    ($fg:expr) => {
+        ansi_term::Style::new().fg(match $fg {
+            PaletteColor::Rgb((r, g, b)) => ansi_term::Color::RGB(r, g, b),
+            PaletteColor::EightBit(color) => ansi_term::Color::Fixed(color),
+        })
+    };
+}
+
 macro_rules! get_or_create_grid {
     ($self:ident, $client_id:ident) => {{
         let rows = $self.get_content_rows();
         let cols = $self.get_content_columns();
+        let explicitly_disable_kitty_keyboard_protocol = false; // N/A for plugins
 
         $self.grids.entry($client_id).or_insert_with(|| {
             let mut grid = Grid::new(
@@ -39,6 +58,11 @@ macro_rules! get_or_create_grid {
                 $self.link_handler.clone(),
                 $self.character_cell_size.clone(),
                 $self.sixel_image_store.clone(),
+                $self.style.clone(),
+                $self.debug,
+                $self.arrow_fonts,
+                $self.styled_underlines,
+                explicitly_disable_kitty_keyboard_protocol,
             );
             grid.hide_cursor();
             grid
@@ -72,6 +96,12 @@ pub(crate) struct PluginPane {
     pane_frame_color_override: Option<(PaletteColor, Option<String>)>,
     invoked_with: Option<Run>,
     loading_indication: LoadingIndication,
+    requesting_permissions: Option<PluginPermission>,
+    debug: bool,
+    arrow_fonts: bool,
+    styled_underlines: bool,
+    should_be_suppressed: bool,
+    text_being_pasted: Option<Vec<u8>>,
 }
 
 impl PluginPane {
@@ -89,6 +119,9 @@ impl PluginPane {
         currently_connected_clients: Vec<ClientId>,
         style: Style,
         invoked_with: Option<Run>,
+        debug: bool,
+        arrow_fonts: bool,
+        styled_underlines: bool,
     ) -> Self {
         let loading_indication = LoadingIndication::new(title.clone()).with_colors(style.colors);
         let initial_loading_message = loading_indication.to_string();
@@ -118,6 +151,12 @@ impl PluginPane {
             pane_frame_color_override: None,
             invoked_with,
             loading_indication,
+            requesting_permissions: None,
+            debug,
+            arrow_fonts,
+            styled_underlines,
+            should_be_suppressed: false,
+            text_being_pasted: None,
         };
         for client_id in currently_connected_clients {
             plugin.handle_plugin_bytes(client_id, initial_loading_message.as_bytes().to_vec());
@@ -166,7 +205,9 @@ impl Pane for PluginPane {
         self.set_should_render(true);
     }
     fn set_geom(&mut self, position_and_size: PaneGeom) {
+        let is_pinned = self.geom.is_pinned;
         self.geom = position_and_size;
+        self.geom.is_pinned = is_pinned;
         self.resize_grids();
         self.set_should_render(true);
     }
@@ -177,6 +218,14 @@ impl Pane for PluginPane {
     }
     fn handle_plugin_bytes(&mut self, client_id: ClientId, bytes: VteBytes) {
         self.set_client_should_render(client_id, true);
+
+        let mut vte_bytes = bytes;
+        if let Some(plugin_permission) = &self.requesting_permissions {
+            vte_bytes = self
+                .display_request_permission_message(plugin_permission)
+                .into();
+        }
+
         let grid = get_or_create_grid!(self, client_id);
 
         // this is part of the plugin contract, whenever we update the plugin and call its render function, we delete the existing viewport
@@ -189,13 +238,85 @@ impl Pane for PluginPane {
             .vte_parsers
             .entry(client_id)
             .or_insert_with(|| vte::Parser::new());
-        for &byte in &bytes {
+
+        for &byte in &vte_bytes {
             vte_parser.advance(grid, byte);
         }
+
         self.should_render.insert(client_id, true);
     }
     fn cursor_coordinates(&self) -> Option<(usize, usize)> {
         None
+    }
+    fn adjust_input_to_terminal(
+        &mut self,
+        key_with_modifier: &Option<KeyWithModifier>,
+        mut raw_input_bytes: Vec<u8>,
+        _raw_input_bytes_are_kitty: bool,
+        client_id: Option<ClientId>,
+    ) -> Option<AdjustedInput> {
+        if let Some(requesting_permissions) = &self.requesting_permissions {
+            let permissions = requesting_permissions.permissions.clone();
+            if let Some(key_with_modifier) = key_with_modifier {
+                match key_with_modifier.bare_key {
+                    BareKey::Char('y') if key_with_modifier.has_no_modifiers() => {
+                        Some(AdjustedInput::PermissionRequestResult(
+                            permissions,
+                            PermissionStatus::Granted,
+                        ))
+                    },
+                    BareKey::Char('n') if key_with_modifier.has_no_modifiers() => {
+                        Some(AdjustedInput::PermissionRequestResult(
+                            permissions,
+                            PermissionStatus::Denied,
+                        ))
+                    },
+                    _ => None,
+                }
+            } else {
+                match raw_input_bytes.as_slice() {
+                    // Y or y
+                    &[89] | &[121] => Some(AdjustedInput::PermissionRequestResult(
+                        permissions,
+                        PermissionStatus::Granted,
+                    )),
+                    // N or n
+                    &[78] | &[110] => Some(AdjustedInput::PermissionRequestResult(
+                        permissions,
+                        PermissionStatus::Denied,
+                    )),
+                    _ => None,
+                }
+            }
+        } else if let Some(key_with_modifier) = key_with_modifier {
+            Some(AdjustedInput::WriteKeyToPlugin(key_with_modifier.clone()))
+        } else if raw_input_bytes.as_slice() == BRACKETED_PASTE_BEGIN {
+            self.text_being_pasted = Some(vec![]);
+            None
+        } else if raw_input_bytes.as_slice() == BRACKETED_PASTE_END {
+            if let Some(text_being_pasted) = self.text_being_pasted.take() {
+                match String::from_utf8(text_being_pasted) {
+                    Ok(pasted_text) => {
+                        let _ = self
+                            .send_plugin_instructions
+                            .send(PluginInstruction::Update(vec![(
+                                Some(self.pid),
+                                client_id,
+                                Event::PastedText(pasted_text),
+                            )]));
+                    },
+                    Err(e) => {
+                        log::error!("Failed to convert pasted bytes as utf8 {:?}", e);
+                    },
+                }
+            }
+            None
+        } else if let Some(pasted_text) = self.text_being_pasted.as_mut() {
+            pasted_text.append(&mut raw_input_bytes);
+            None
+        } else {
+            Some(AdjustedInput::WriteBytesToTerminal(raw_input_bytes))
+        }
     }
     fn position_and_size(&self) -> PaneGeom {
         self.geom
@@ -228,6 +349,9 @@ impl Pane for PluginPane {
     }
     fn set_selectable(&mut self, selectable: bool) {
         self.selectable = selectable;
+    }
+    fn request_permissions_from_user(&mut self, permissions: Option<PluginPermission>) {
+        self.requesting_permissions = permissions;
     }
     fn render(
         &mut self,
@@ -289,19 +413,15 @@ impl Pane for PluginPane {
                 self.pane_name.clone()
             };
 
-            let mut frame_geom = self.current_geom();
-            if !frame_params.should_draw_pane_frames {
-                // in this case the width of the frame needs not include the pane corners
-                frame_geom
-                    .cols
-                    .set_inner(frame_geom.cols.as_usize().saturating_sub(1));
-            }
+            let frame_geom = self.current_geom();
+            let is_pinned = frame_geom.is_pinned;
             let mut frame = PaneFrame::new(
                 frame_geom.into(),
                 grid.scrollback_position_and_length(),
                 pane_title,
                 frame_params,
-            );
+            )
+            .is_pinned(is_pinned);
             if let Some((frame_color_override, _text)) = self.pane_frame_color_override.as_ref() {
                 frame.override_color(*frame_color_override);
             }
@@ -488,6 +608,10 @@ impl Pane for PluginPane {
         self.resize_grids();
     }
 
+    fn get_content_offset(&self) -> Offset {
+        self.content_offset
+    }
+
     fn store_pane_name(&mut self) {
         if self.pane_name != self.prev_pane_name {
             self.prev_pane_name = self.pane_name.clone()
@@ -521,7 +645,7 @@ impl Pane for PluginPane {
             .unwrap();
     }
     fn add_red_pane_frame_color_override(&mut self, error_text: Option<String>) {
-        self.pane_frame_color_override = Some((self.style.colors.red, error_text));
+        self.pane_frame_color_override = Some((self.style.colors.exit_code_error.base, error_text));
     }
     fn clear_pane_frame_color_override(&mut self) {
         self.pane_frame_color_override = None;
@@ -538,7 +662,7 @@ impl Pane for PluginPane {
         self.pane_title = title;
     }
     fn update_loading_indication(&mut self, loading_indication: LoadingIndication) {
-        if self.loading_indication.ended {
+        if self.loading_indication.ended && !loading_indication.is_error() {
             return;
         }
         self.loading_indication.merge(loading_indication);
@@ -561,6 +685,103 @@ impl Pane for PluginPane {
             self.loading_indication.to_string().as_bytes().to_vec(),
         );
     }
+    fn current_title(&self) -> String {
+        if self.pane_name.is_empty() {
+            self.pane_title.to_owned()
+        } else {
+            self.pane_name.to_owned()
+        }
+    }
+    fn custom_title(&self) -> Option<String> {
+        if self.pane_name.is_empty() {
+            None
+        } else {
+            Some(self.pane_name.clone())
+        }
+    }
+    fn rename(&mut self, buf: Vec<u8>) {
+        self.pane_name = String::from_utf8_lossy(&buf).to_string();
+        self.set_should_render(true);
+    }
+    fn update_theme(&mut self, theme: Styling) {
+        self.style.colors = theme.clone();
+        for grid in self.grids.values_mut() {
+            grid.update_theme(theme.clone());
+        }
+    }
+    fn update_arrow_fonts(&mut self, should_support_arrow_fonts: bool) {
+        self.arrow_fonts = should_support_arrow_fonts;
+        for grid in self.grids.values_mut() {
+            grid.update_arrow_fonts(should_support_arrow_fonts);
+        }
+        self.set_should_render(true);
+    }
+    fn update_rounded_corners(&mut self, rounded_corners: bool) {
+        self.style.rounded_corners = rounded_corners;
+        self.frame.clear();
+    }
+    fn set_should_be_suppressed(&mut self, should_be_suppressed: bool) {
+        self.should_be_suppressed = should_be_suppressed;
+    }
+    fn query_should_be_suppressed(&self) -> bool {
+        self.should_be_suppressed
+    }
+    fn toggle_pinned(&mut self) {
+        self.geom.is_pinned = !self.geom.is_pinned;
+    }
+    fn set_pinned(&mut self, should_be_pinned: bool) {
+        self.geom.is_pinned = should_be_pinned;
+    }
+    fn intercept_left_mouse_click(&mut self, position: &Position, client_id: ClientId) -> bool {
+        if self.position_is_on_frame(position) {
+            let relative_position = self.relative_position(position);
+            if let Some(client_frame) = self.frame.get_mut(&client_id) {
+                if client_frame.clicked_on_pinned(relative_position) {
+                    self.toggle_pinned();
+                    return true;
+                }
+            }
+        }
+        false
+    }
+    fn intercept_mouse_event_on_frame(&mut self, event: &MouseEvent, client_id: ClientId) -> bool {
+        if self.position_is_on_frame(&event.position) {
+            let relative_position = self.relative_position(&event.position);
+            if let MouseEventType::Press = event.event_type {
+                if let Some(client_frame) = self.frame.get_mut(&client_id) {
+                    if client_frame.clicked_on_pinned(relative_position) {
+                        self.toggle_pinned();
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+    fn reset_logical_position(&mut self) {
+        self.geom.logical_position = None;
+    }
+    fn mouse_event(&self, event: &MouseEvent, client_id: ClientId) -> Option<String> {
+        match event.event_type {
+            MouseEventType::Motion
+                if !event.left
+                    && !event.right
+                    && !event.middle
+                    && !event.wheel_up
+                    && !event.wheel_down =>
+            {
+                let _ = self
+                    .send_plugin_instructions
+                    .send(PluginInstruction::Update(vec![(
+                        Some(self.pid),
+                        Some(client_id),
+                        Event::Mouse(Mouse::Hover(event.position.line(), event.position.column())),
+                    )]));
+            },
+            _ => {},
+        }
+        None
+    }
 }
 
 impl PluginPane {
@@ -580,5 +801,55 @@ impl PluginPane {
         for client_id in client_ids {
             self.handle_plugin_bytes(client_id, bytes.clone());
         }
+    }
+    fn display_request_permission_message(&self, plugin_permission: &PluginPermission) -> String {
+        let bold_white = style!(self.style.colors.text_unselected.base).bold();
+        let cyan = style!(self.style.colors.text_unselected.emphasis_1).bold();
+        let orange = style!(self.style.colors.text_unselected.emphasis_0).bold();
+        let green = style!(self.style.colors.text_unselected.emphasis_2).bold();
+
+        let mut messages = String::new();
+        let permissions: BTreeSet<PermissionType> =
+            plugin_permission.permissions.clone().into_iter().collect();
+
+        let min_row_count = permissions.len() + 4;
+
+        if self.rows() >= min_row_count {
+            messages.push_str(&format!(
+                "{} {} {}\n",
+                bold_white.paint("Plugin"),
+                cyan.paint(&plugin_permission.name),
+                bold_white.paint("asks permission to:"),
+            ));
+            permissions.iter().enumerate().for_each(|(i, p)| {
+                messages.push_str(&format!(
+                    "\n\r{}. {}",
+                    bold_white.paint(&format!("{}", i + 1)),
+                    orange.paint(p.display_name())
+                ));
+            });
+
+            messages.push_str(&format!(
+                "\n\n\r{} {}",
+                bold_white.paint("Allow?"),
+                green.paint("(y/n)"),
+            ));
+        } else {
+            messages.push_str(&format!(
+                "{} {}. {} {}",
+                bold_white.paint("This plugin asks permission to:"),
+                orange.paint(
+                    permissions
+                        .iter()
+                        .map(|p| p.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+                bold_white.paint("Allow?"),
+                green.paint("(y/n)"),
+            ));
+        }
+
+        messages
     }
 }

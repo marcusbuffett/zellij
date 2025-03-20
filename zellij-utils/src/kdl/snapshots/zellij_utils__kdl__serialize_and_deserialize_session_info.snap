@@ -1,0 +1,16 @@
+---
+source: zellij-utils/src/kdl/mod.rs
+assertion_line: 5000
+expression: serialized
+---
+name ""
+tabs {
+}
+panes {
+}
+connected_clients 0
+available_layouts {
+}
+tab_history {
+}
+

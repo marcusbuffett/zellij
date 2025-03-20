@@ -761,16 +761,12 @@ impl<'a> FloatingPaneGrid<'a> {
                 a_pane.y().cmp(&b_pane.y())
             }
         });
-        let active_pane_position = panes
-            .iter()
-            .position(|(id, _)| id == current_pane_id)
-            .unwrap();
+        let active_pane_position = panes.iter().position(|(id, _)| id == current_pane_id)?;
 
         let next_active_pane_id = panes
             .get(active_pane_position + 1)
             .or_else(|| panes.get(0))
-            .map(|p| p.0)
-            .unwrap();
+            .map(|p| p.0)?;
         Some(next_active_pane_id)
     }
     pub fn previous_selectable_pane_id(&self, current_pane_id: &PaneId) -> Option<PaneId> {
@@ -854,13 +850,15 @@ impl<'a> FloatingPaneGrid<'a> {
     }
 }
 
-fn half_size_middle_geom(space: &Viewport, offset: usize) -> PaneGeom {
+pub fn half_size_middle_geom(space: &Viewport, offset: usize) -> PaneGeom {
     let mut geom = PaneGeom {
         x: space.x + (space.cols as f64 / 4.0).round() as usize + offset,
         y: space.y + (space.rows as f64 / 4.0).round() as usize + offset,
         cols: Dimension::fixed(space.cols / 2),
         rows: Dimension::fixed(space.rows / 2),
-        is_stacked: false,
+        stacked: None,
+        is_pinned: false,
+        logical_position: None,
     };
     geom.cols.set_inner(space.cols / 2);
     geom.rows.set_inner(space.rows / 2);
@@ -873,7 +871,9 @@ fn half_size_top_left_geom(space: &Viewport, offset: usize) -> PaneGeom {
         y: space.y + 2 + offset,
         cols: Dimension::fixed(space.cols / 3),
         rows: Dimension::fixed(space.rows / 3),
-        is_stacked: false,
+        stacked: None,
+        is_pinned: false,
+        logical_position: None,
     };
     geom.cols.set_inner(space.cols / 3);
     geom.rows.set_inner(space.rows / 3);
@@ -886,7 +886,9 @@ fn half_size_top_right_geom(space: &Viewport, offset: usize) -> PaneGeom {
         y: space.y + 2 + offset,
         cols: Dimension::fixed(space.cols / 3),
         rows: Dimension::fixed(space.rows / 3),
-        is_stacked: false,
+        stacked: None,
+        is_pinned: false,
+        logical_position: None,
     };
     geom.cols.set_inner(space.cols / 3);
     geom.rows.set_inner(space.rows / 3);
@@ -899,7 +901,9 @@ fn half_size_bottom_left_geom(space: &Viewport, offset: usize) -> PaneGeom {
         y: ((space.y + space.rows) - (space.rows / 3) - 2).saturating_sub(offset),
         cols: Dimension::fixed(space.cols / 3),
         rows: Dimension::fixed(space.rows / 3),
-        is_stacked: false,
+        stacked: None,
+        is_pinned: false,
+        logical_position: None,
     };
     geom.cols.set_inner(space.cols / 3);
     geom.rows.set_inner(space.rows / 3);
@@ -912,7 +916,9 @@ fn half_size_bottom_right_geom(space: &Viewport, offset: usize) -> PaneGeom {
         y: ((space.y + space.rows) - (space.rows / 3) - 2).saturating_sub(offset),
         cols: Dimension::fixed(space.cols / 3),
         rows: Dimension::fixed(space.rows / 3),
-        is_stacked: false,
+        stacked: None,
+        is_pinned: false,
+        logical_position: None,
     };
     geom.cols.set_inner(space.cols / 3);
     geom.rows.set_inner(space.rows / 3);

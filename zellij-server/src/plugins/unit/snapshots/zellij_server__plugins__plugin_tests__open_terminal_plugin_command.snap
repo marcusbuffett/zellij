@@ -1,0 +1,32 @@
+---
+source: zellij-server/src/plugins/./unit/plugin_tests.rs
+assertion_line: 4323
+expression: "format!(\"{:#?}\", new_tab_event)"
+---
+Some(
+    SpawnTerminal(
+        Some(
+            RunCommand(
+                RunCommand {
+                    command: ".",
+                    args: [],
+                    cwd: Some(
+                        "/path/to/my/file.rs",
+                    ),
+                    hold_on_close: false,
+                    hold_on_start: false,
+                    originating_plugin: None,
+                },
+            ),
+        ),
+        Some(
+            false,
+        ),
+        None,
+        None,
+        false,
+        ClientId(
+            1,
+        ),
+    ),
+)

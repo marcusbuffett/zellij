@@ -1,6 +1,5 @@
 //! Plugins configuration metadata
-use std::borrow::Borrow;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -8,70 +7,26 @@ use thiserror::Error;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-use super::layout::{RunPlugin, RunPluginLocation};
+use super::layout::{PluginUserConfiguration, RunPlugin, RunPluginLocation};
 #[cfg(not(target_family = "wasm"))]
 use crate::consts::ASSET_MAP;
 pub use crate::data::PluginTag;
 use crate::errors::prelude::*;
 
-use std::collections::BTreeMap;
-use std::fmt;
-
-/// Used in the config struct for plugin metadata
-#[derive(Clone, PartialEq, Deserialize, Serialize)]
-pub struct PluginsConfig(pub HashMap<PluginTag, PluginConfig>);
-
-impl fmt::Debug for PluginsConfig {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut stable_sorted = BTreeMap::new();
-        for (plugin_tag, plugin_config) in self.0.iter() {
-            stable_sorted.insert(plugin_tag, plugin_config);
-        }
-        write!(f, "{:#?}", stable_sorted)
-    }
+#[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
+pub struct PluginAliases {
+    pub aliases: BTreeMap<String, RunPlugin>,
 }
 
-impl PluginsConfig {
-    pub fn new() -> Self {
-        Self(HashMap::new())
+impl PluginAliases {
+    pub fn merge(&mut self, other: Self) {
+        self.aliases.extend(other.aliases);
     }
-    pub fn from_data(data: HashMap<PluginTag, PluginConfig>) -> Self {
-        PluginsConfig(data)
+    pub fn from_data(aliases: BTreeMap<String, RunPlugin>) -> Self {
+        PluginAliases { aliases }
     }
-
-    /// Get plugin config from run configuration specified in layout files.
-    pub fn get(&self, run: impl Borrow<RunPlugin>) -> Option<PluginConfig> {
-        let run = run.borrow();
-        match &run.location {
-            RunPluginLocation::File(path) => Some(PluginConfig {
-                path: path.clone(),
-                run: PluginType::Pane(None),
-                _allow_exec_host_cmd: run._allow_exec_host_cmd,
-                location: run.location.clone(),
-            }),
-            RunPluginLocation::Zellij(tag) => self.0.get(tag).cloned().map(|plugin| PluginConfig {
-                _allow_exec_host_cmd: run._allow_exec_host_cmd,
-                ..plugin
-            }),
-        }
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = &PluginConfig> {
-        self.0.values()
-    }
-
-    /// Merges two PluginConfig structs into one PluginConfig struct
-    /// `other` overrides the PluginConfig of `self`.
-    pub fn merge(&self, other: Self) -> Self {
-        let mut plugin_config = self.0.clone();
-        plugin_config.extend(other.0);
-        Self(plugin_config)
-    }
-}
-
-impl Default for PluginsConfig {
-    fn default() -> Self {
-        PluginsConfig(HashMap::new())
+    pub fn list(&self) -> Vec<String> {
+        self.aliases.keys().cloned().collect()
     }
 }
 
@@ -80,15 +35,58 @@ impl Default for PluginsConfig {
 pub struct PluginConfig {
     /// Path of the plugin, see resolve_wasm_bytes for resolution semantics
     pub path: PathBuf,
-    /// Plugin type
-    pub run: PluginType,
     /// Allow command execution from plugin
     pub _allow_exec_host_cmd: bool,
     /// Original location of the
     pub location: RunPluginLocation,
+    /// Custom configuration for this plugin
+    pub userspace_configuration: PluginUserConfiguration,
+    /// plugin initial working directory
+    pub initial_cwd: Option<PathBuf>,
 }
 
 impl PluginConfig {
+    pub fn from_run_plugin(run_plugin: &RunPlugin) -> Option<PluginConfig> {
+        match &run_plugin.location {
+            RunPluginLocation::File(path) => Some(PluginConfig {
+                path: path.clone(),
+                _allow_exec_host_cmd: run_plugin._allow_exec_host_cmd,
+                location: run_plugin.location.clone(),
+                userspace_configuration: run_plugin.configuration.clone(),
+                initial_cwd: run_plugin.initial_cwd.clone(),
+            }),
+            RunPluginLocation::Zellij(tag) => {
+                let tag = tag.to_string();
+                if tag == "status-bar"
+                    || tag == "tab-bar"
+                    || tag == "compact-bar"
+                    || tag == "strider"
+                    || tag == "session-manager"
+                    || tag == "configuration"
+                    || tag == "plugin-manager"
+                    || tag == "about"
+                {
+                    Some(PluginConfig {
+                        path: PathBuf::from(&tag),
+                        _allow_exec_host_cmd: run_plugin._allow_exec_host_cmd,
+                        location: RunPluginLocation::parse(&format!("zellij:{}", tag), None)
+                            .ok()?,
+                        userspace_configuration: run_plugin.configuration.clone(),
+                        initial_cwd: run_plugin.initial_cwd.clone(),
+                    })
+                } else {
+                    None
+                }
+            },
+            RunPluginLocation::Remote(_) => Some(PluginConfig {
+                path: PathBuf::new(),
+                _allow_exec_host_cmd: run_plugin._allow_exec_host_cmd,
+                location: run_plugin.location.clone(),
+                userspace_configuration: run_plugin.configuration.clone(),
+                initial_cwd: run_plugin.initial_cwd.clone(),
+            }),
+        }
+    }
     /// Resolve wasm plugin bytes for the plugin path and given plugin directory.
     ///
     /// If zellij was built without the 'disable_automatic_asset_installation' feature, builtin
@@ -186,38 +184,8 @@ impl PluginConfig {
         return last_err;
     }
 
-    /// Sets the tab index inside of the plugin type of the run field.
-    pub fn set_tab_index(&mut self, tab_index: usize) {
-        match self.run {
-            PluginType::Pane(..) => {
-                self.run = PluginType::Pane(Some(tab_index));
-            },
-            PluginType::Headless => {},
-        }
-    }
-
     pub fn is_builtin(&self) -> bool {
         matches!(self.location, RunPluginLocation::Zellij(_))
-    }
-}
-
-/// Type of the plugin. Defaults to Pane.
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, Hash, Eq)]
-#[serde(rename_all = "kebab-case")]
-pub enum PluginType {
-    // TODO: A plugin with output that's cloned across every pane in a tab, or across the entire
-    // application might be useful
-    // Tab
-    // Static
-    /// Starts immediately when Zellij is started and runs without a visible pane
-    Headless,
-    /// Runs once per pane declared inside a layout file
-    Pane(Option<usize>), // tab_index
-}
-
-impl Default for PluginType {
-    fn default() -> Self {
-        Self::Pane(None)
     }
 }
 
@@ -227,7 +195,7 @@ pub enum PluginsConfigError {
     DuplicatePlugins(PluginTag),
     #[error("Failed to parse url: {0:?}")]
     InvalidUrl(#[from] url::ParseError),
-    #[error("Only 'file:' and 'zellij:' url schemes are supported for plugin lookup. '{0}' does not match either.")]
+    #[error("Only 'file:', 'http(s):' and 'zellij:' url schemes are supported for plugin lookup. '{0}' does not match either.")]
     InvalidUrlScheme(Url),
     #[error("Could not find plugin at the path: '{0:?}'")]
     InvalidPluginLocation(PathBuf),

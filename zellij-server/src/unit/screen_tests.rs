@@ -10,11 +10,15 @@ use crate::{
 use insta::assert_snapshot;
 use std::path::PathBuf;
 use zellij_utils::cli::CliAction;
-use zellij_utils::data::Resize;
+use zellij_utils::data::{Event, Resize, Style};
 use zellij_utils::errors::{prelude::*, ErrorContext};
 use zellij_utils::input::actions::Action;
 use zellij_utils::input::command::{RunCommand, TerminalAction};
-use zellij_utils::input::layout::{Layout, SplitDirection, TiledPaneLayout};
+use zellij_utils::input::config::Config;
+use zellij_utils::input::layout::{
+    FloatingPaneLayout, Layout, PluginAlias, PluginUserConfiguration, Run, RunPlugin,
+    RunPluginLocation, RunPluginOrAlias, SplitDirection, SplitSize, TiledPaneLayout,
+};
 use zellij_utils::input::options::Options;
 use zellij_utils::ipc::IpcReceiverWithContext;
 use zellij_utils::pane_size::{Size, SizeInPixels};
@@ -25,12 +29,15 @@ use std::env::set_var;
 use std::os::unix::io::RawFd;
 use std::sync::{Arc, Mutex};
 
-use crate::{plugins::PluginInstruction, pty::PtyInstruction};
+use crate::{
+    plugins::PluginInstruction,
+    pty::{ClientTabIndexOrPaneId, PtyInstruction},
+};
 use zellij_utils::ipc::PixelDimensions;
 
 use zellij_utils::{
     channels::{self, ChannelWithContext, Receiver},
-    data::{Direction, InputMode, ModeInfo, Palette, PluginCapabilities},
+    data::{Direction, FloatingPaneCoordinates, InputMode, ModeInfo, Palette, PluginCapabilities},
     interprocess::local_socket::LocalSocketStream,
     ipc::{ClientAttributes, ClientToServerMsg, ServerToClientMsg},
 };
@@ -64,6 +71,10 @@ fn take_snapshots_and_cursor_coordinates_from_render_events<'a>(
         width: 8,
         height: 21,
     })));
+    let debug = false;
+    let arrow_fonts = true;
+    let styled_underlines = true;
+    let explicitly_disable_kitty_keyboard_protocol = false;
     let mut grid = Grid::new(
         screen_size.rows,
         screen_size.cols,
@@ -72,6 +83,11 @@ fn take_snapshots_and_cursor_coordinates_from_render_events<'a>(
         Rc::new(RefCell::new(LinkHandler::new())),
         character_cell_size,
         sixel_image_store,
+        Style::default(),
+        debug,
+        arrow_fonts,
+        styled_underlines,
+        explicitly_disable_kitty_keyboard_protocol,
     );
     let snapshots: Vec<(Option<(usize, usize)>, String)> = all_events
         .filter_map(|server_instruction| {
@@ -97,20 +113,38 @@ fn take_snapshots_and_cursor_coordinates_from_render_events<'a>(
 fn send_cli_action_to_server(
     session_metadata: &SessionMetaData,
     cli_action: CliAction,
-    mock_screen: &mut MockScreen,
     client_id: ClientId,
 ) {
-    let os_input = Box::new(mock_screen.os_input.clone());
-    let to_server = mock_screen.to_server.clone();
     let get_current_dir = || PathBuf::from(".");
     let actions = Action::actions_from_cli(cli_action, Box::new(get_current_dir), None).unwrap();
+    let senders = session_metadata.senders.clone();
+    let capabilities = PluginCapabilities::default();
+    let client_attributes = ClientAttributes::default();
+    let default_shell = None;
+    let default_layout = Box::new(Layout::default());
+    let default_mode = session_metadata
+        .session_configuration
+        .get_client_configuration(&client_id)
+        .options
+        .default_mode
+        .unwrap_or(InputMode::Normal);
+    let client_keybinds = session_metadata
+        .session_configuration
+        .get_client_keybinds(&client_id)
+        .clone();
     for action in actions {
         route_action(
             action,
-            &session_metadata,
-            &*os_input,
-            &to_server.clone(),
             client_id,
+            None,
+            senders.clone(),
+            capabilities,
+            client_attributes.clone(),
+            default_shell.clone(),
+            default_layout.clone(),
+            None,
+            client_keybinds.clone(),
+            default_mode,
         )
         .unwrap();
     }
@@ -225,7 +259,19 @@ fn create_new_screen(size: Size) -> Screen {
     let auto_layout = true;
     let session_is_mirrored = true;
     let copy_options = CopyOptions::default();
+    let default_layout = Box::new(Layout::default());
+    let default_layout_name = None;
+    let default_shell = PathBuf::from("my_default_shell");
+    let session_serialization = true;
+    let serialize_pane_viewport = false;
+    let scrollback_lines_to_serialize = None;
+    let layout_dir = None;
 
+    let debug = false;
+    let styled_underlines = true;
+    let arrow_fonts = true;
+    let explicitly_disable_kitty_keyboard_protocol = false;
+    let stacked_resize = true;
     let screen = Screen::new(
         bus,
         &client_attributes,
@@ -235,6 +281,19 @@ fn create_new_screen(size: Size) -> Screen {
         auto_layout,
         session_is_mirrored,
         copy_options,
+        debug,
+        default_layout,
+        default_layout_name,
+        default_shell,
+        session_serialization,
+        serialize_pane_viewport,
+        scrollback_lines_to_serialize,
+        styled_underlines,
+        arrow_fonts,
+        layout_dir,
+        explicitly_disable_kitty_keyboard_protocol,
+        stacked_resize,
+        None,
     );
     screen
 }
@@ -257,12 +316,17 @@ struct MockScreen {
     pub client_attributes: ClientAttributes,
     pub config_options: Options,
     pub session_metadata: SessionMetaData,
+    pub config: Config,
     last_opened_tab_index: Option<usize>,
 }
 
 impl MockScreen {
-    pub fn run(&mut self, initial_layout: Option<TiledPaneLayout>) -> std::thread::JoinHandle<()> {
-        let config_options = self.config_options.clone();
+    pub fn run(
+        &mut self,
+        initial_layout: Option<TiledPaneLayout>,
+        initial_floating_panes_layout: Vec<FloatingPaneLayout>,
+    ) -> std::thread::JoinHandle<()> {
+        let config = self.config.clone();
         let client_attributes = self.client_attributes.clone();
         let screen_bus = Bus::new(
             vec![self.screen_receiver.take().unwrap()],
@@ -275,6 +339,7 @@ impl MockScreen {
             Some(Box::new(self.os_input.clone())),
         )
         .should_silently_fail();
+        let debug = false;
         let screen_thread = std::thread::Builder::new()
             .name("screen_thread".to_string())
             .spawn(move || {
@@ -283,37 +348,138 @@ impl MockScreen {
                     screen_bus,
                     None,
                     client_attributes,
-                    Box::new(config_options),
+                    config,
+                    debug,
+                    Box::new(Layout::default()),
                 )
                 .expect("TEST")
             })
             .unwrap();
         let pane_layout = initial_layout.unwrap_or_default();
         let pane_count = pane_layout.extract_run_instructions().len();
+        let floating_pane_count = initial_floating_panes_layout.len();
         let mut pane_ids = vec![];
-        let plugin_ids = HashMap::new();
+        let mut floating_pane_ids = vec![];
+        let mut plugin_ids = HashMap::new();
+        plugin_ids.insert(
+            RunPluginOrAlias::from_url("file:/path/to/fake/plugin", &None, None, None).unwrap(),
+            vec![1],
+        );
         for i in 0..pane_count {
             pane_ids.push((i as u32, None));
+        }
+        for i in 0..floating_pane_count {
+            floating_pane_ids.push((i as u32, None));
         }
         let default_shell = None;
         let tab_name = None;
         let tab_index = self.last_opened_tab_index.map(|l| l + 1).unwrap_or(0);
+        let should_change_focus_to_new_tab = true;
         let _ = self.to_screen.send(ScreenInstruction::NewTab(
             None,
             default_shell,
             Some(pane_layout.clone()),
-            vec![], // floating_panes_layout
+            initial_floating_panes_layout.clone(),
             tab_name,
             (vec![], vec![]), // swap layouts
+            should_change_focus_to_new_tab,
             self.main_client_id,
         ));
         let _ = self.to_screen.send(ScreenInstruction::ApplyLayout(
             pane_layout,
-            vec![], // floating panes layout
+            initial_floating_panes_layout,
             pane_ids,
-            vec![], // floating pane ids
+            floating_pane_ids,
             plugin_ids,
             tab_index,
+            true,
+            self.main_client_id,
+        ));
+        self.last_opened_tab_index = Some(tab_index);
+        screen_thread
+    }
+    // same as the above function, but starts a plugin with a plugin alias
+    pub fn run_with_alias(
+        &mut self,
+        initial_layout: Option<TiledPaneLayout>,
+        initial_floating_panes_layout: Vec<FloatingPaneLayout>,
+    ) -> std::thread::JoinHandle<()> {
+        let config = self.config.clone();
+        let client_attributes = self.client_attributes.clone();
+        let screen_bus = Bus::new(
+            vec![self.screen_receiver.take().unwrap()],
+            None,
+            Some(&self.to_pty.clone()),
+            Some(&self.to_plugin.clone()),
+            Some(&self.to_server.clone()),
+            Some(&self.to_pty_writer.clone()),
+            Some(&self.to_background_jobs.clone()),
+            Some(Box::new(self.os_input.clone())),
+        )
+        .should_silently_fail();
+        let debug = false;
+        let screen_thread = std::thread::Builder::new()
+            .name("screen_thread".to_string())
+            .spawn(move || {
+                set_var("ZELLIJ_SESSION_NAME", "zellij-test");
+                screen_thread_main(
+                    screen_bus,
+                    None,
+                    client_attributes,
+                    config,
+                    debug,
+                    Box::new(Layout::default()),
+                )
+                .expect("TEST")
+            })
+            .unwrap();
+        let pane_layout = initial_layout.unwrap_or_default();
+        let pane_count = pane_layout.extract_run_instructions().len();
+        let floating_pane_count = initial_floating_panes_layout.len();
+        let mut pane_ids = vec![];
+        let mut floating_pane_ids = vec![];
+        let mut plugin_ids = HashMap::new();
+        plugin_ids.insert(
+            RunPluginOrAlias::Alias(PluginAlias {
+                name: "fixture_plugin_for_tests".to_owned(),
+                configuration: Some(Default::default()),
+                run_plugin: Some(RunPlugin {
+                    location: RunPluginLocation::parse("file:/path/to/fake/plugin", None).unwrap(),
+                    configuration: PluginUserConfiguration::default(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }),
+            vec![1],
+        );
+        for i in 0..pane_count {
+            pane_ids.push((i as u32, None));
+        }
+        for i in 0..floating_pane_count {
+            floating_pane_ids.push((i as u32, None));
+        }
+        let default_shell = None;
+        let tab_name = None;
+        let tab_index = self.last_opened_tab_index.map(|l| l + 1).unwrap_or(0);
+        let should_change_focus_to_new_tab = true;
+        let _ = self.to_screen.send(ScreenInstruction::NewTab(
+            None,
+            default_shell,
+            Some(pane_layout.clone()),
+            initial_floating_panes_layout.clone(),
+            tab_name,
+            (vec![], vec![]), // swap layouts
+            should_change_focus_to_new_tab,
+            self.main_client_id,
+        ));
+        let _ = self.to_screen.send(ScreenInstruction::ApplyLayout(
+            pane_layout,
+            initial_floating_panes_layout,
+            pane_ids,
+            floating_pane_ids,
+            plugin_ids,
+            tab_index,
+            true,
             self.main_client_id,
         ));
         self.last_opened_tab_index = Some(tab_index);
@@ -329,6 +495,7 @@ impl MockScreen {
         for i in 0..pane_count {
             pane_ids.push((i as u32, None));
         }
+        let should_change_focus_to_new_tab = true;
         let _ = self.to_screen.send(ScreenInstruction::NewTab(
             None,
             default_shell,
@@ -336,6 +503,7 @@ impl MockScreen {
             vec![], // floating_panes_layout
             tab_name,
             (vec![], vec![]), // swap layouts
+            should_change_focus_to_new_tab,
             self.main_client_id,
         ));
         let _ = self.to_screen.send(ScreenInstruction::ApplyLayout(
@@ -345,6 +513,7 @@ impl MockScreen {
             vec![], // floating panes ids
             plugin_ids,
             0,
+            true,
             self.main_client_id,
         ));
         self.last_opened_tab_index = Some(tab_index);
@@ -372,7 +541,9 @@ impl MockScreen {
             plugin_thread: None,
             pty_writer_thread: None,
             background_jobs_thread: None,
+            session_configuration: self.session_metadata.session_configuration.clone(),
             layout,
+            current_input_modes: self.session_metadata.current_input_modes.clone(),
         }
     }
 }
@@ -429,6 +600,8 @@ impl MockScreen {
             pty_writer_thread: None,
             background_jobs_thread: None,
             layout,
+            session_configuration: Default::default(),
+            current_input_modes: HashMap::new(),
         };
 
         let os_input = FakeInputOutput::default();
@@ -453,6 +626,7 @@ impl MockScreen {
             config_options,
             session_metadata,
             last_opened_tab_index: None,
+            config: Config::default(),
         }
     }
 }
@@ -487,7 +661,7 @@ fn new_tab(screen: &mut Screen, pid: u32, tab_index: usize) {
     let new_terminal_ids = vec![(pid, None)];
     let new_plugin_ids = HashMap::new();
     screen
-        .new_tab(tab_index, (vec![], vec![]), None, client_id)
+        .new_tab(tab_index, (vec![], vec![]), None, Some(client_id))
         .expect("TEST");
     screen
         .apply_layout(
@@ -497,6 +671,7 @@ fn new_tab(screen: &mut Screen, pid: u32, tab_index: usize) {
             vec![], // new floating terminal ids
             new_plugin_ids,
             tab_index,
+            true,
             client_id,
         )
         .expect("TEST");
@@ -531,7 +706,7 @@ pub fn switch_to_prev_tab() {
 
     new_tab(&mut screen, 1, 1);
     new_tab(&mut screen, 2, 2);
-    screen.switch_tab_prev(None, 1).expect("TEST");
+    screen.switch_tab_prev(None, true, 1).expect("TEST");
 
     assert_eq!(
         screen.get_active_tab(1).unwrap().position,
@@ -550,8 +725,8 @@ pub fn switch_to_next_tab() {
 
     new_tab(&mut screen, 1, 1);
     new_tab(&mut screen, 2, 2);
-    screen.switch_tab_prev(None, 1).expect("TEST");
-    screen.switch_tab_next(None, 1).expect("TEST");
+    screen.switch_tab_prev(None, true, 1).expect("TEST");
+    screen.switch_tab_next(None, true, 1).expect("TEST");
 
     assert_eq!(
         screen.get_active_tab(1).unwrap().position,
@@ -625,7 +800,7 @@ pub fn close_the_middle_tab() {
     new_tab(&mut screen, 1, 1);
     new_tab(&mut screen, 2, 2);
     new_tab(&mut screen, 3, 3);
-    screen.switch_tab_prev(None, 1).expect("TEST");
+    screen.switch_tab_prev(None, true, 1).expect("TEST");
     screen.close_tab(1).expect("TEST");
 
     assert_eq!(screen.tabs.len(), 2, "Two tabs left");
@@ -647,13 +822,157 @@ fn move_focus_left_at_left_screen_edge_changes_tab() {
     new_tab(&mut screen, 1, 1);
     new_tab(&mut screen, 2, 2);
     new_tab(&mut screen, 3, 3);
-    screen.switch_tab_prev(None, 1).expect("TEST");
+    screen.switch_tab_prev(None, true, 1).expect("TEST");
     screen.move_focus_left_or_previous_tab(1).expect("TEST");
 
     assert_eq!(
         screen.get_active_tab(1).unwrap().position,
         0,
         "Active tab switched to previous"
+    );
+}
+
+#[test]
+fn basic_move_of_active_tab_to_left() {
+    let mut screen = create_fixed_size_screen();
+    new_tab(&mut screen, 1, 0);
+    new_tab(&mut screen, 2, 1);
+    assert_eq!(screen.get_active_tab(1).unwrap().position, 1);
+
+    screen.move_active_tab_to_left(1).expect("TEST");
+
+    assert_eq!(
+        screen.get_active_tab(1).unwrap().position,
+        0,
+        "Active tab moved to left"
+    );
+}
+
+fn create_fixed_size_screen() -> Screen {
+    create_new_screen(Size {
+        cols: 121,
+        rows: 20,
+    })
+}
+
+#[test]
+fn move_of_active_tab_to_left_when_there_is_only_one_tab() {
+    let mut screen = create_fixed_size_screen();
+    new_tab(&mut screen, 1, 0);
+    assert_eq!(screen.get_active_tab(1).unwrap().position, 0);
+
+    screen.move_active_tab_to_left(1).expect("TEST");
+
+    assert_eq!(
+        screen.get_active_tab(1).unwrap().position,
+        0,
+        "Active tab moved to left"
+    );
+}
+
+#[test]
+fn move_of_active_tab_to_left_multiple_times() {
+    let mut screen = create_fixed_size_screen();
+    new_tab(&mut screen, 1, 0);
+    new_tab(&mut screen, 2, 1);
+    new_tab(&mut screen, 3, 2);
+    assert_eq!(screen.get_active_tab(1).unwrap().position, 2);
+
+    screen.move_active_tab_to_left(1).expect("TEST");
+    screen.move_active_tab_to_left(1).expect("TEST");
+
+    assert_eq!(
+        screen.get_active_tab(1).unwrap().position,
+        0,
+        "Active tab moved to left twice"
+    );
+}
+
+#[test]
+fn wrapping_move_of_active_tab_to_left() {
+    let mut screen = create_fixed_size_screen();
+    new_tab(&mut screen, 1, 0);
+    new_tab(&mut screen, 2, 1);
+    new_tab(&mut screen, 3, 2);
+    screen.move_focus_left_or_previous_tab(1).expect("TEST");
+    screen.move_focus_left_or_previous_tab(1).expect("TEST");
+    assert_eq!(screen.get_active_tab(1).unwrap().position, 0);
+
+    screen.move_active_tab_to_left(1).expect("TEST");
+
+    assert_eq!(
+        screen.get_active_tab(1).unwrap().position,
+        2,
+        "Active tab moved to left until wrapped around"
+    );
+}
+
+#[test]
+fn basic_move_of_active_tab_to_right() {
+    let mut screen = create_fixed_size_screen();
+    new_tab(&mut screen, 1, 0);
+    new_tab(&mut screen, 2, 1);
+    screen.move_focus_left_or_previous_tab(1).expect("TEST");
+    assert_eq!(screen.get_active_tab(1).unwrap().position, 0);
+
+    screen.move_active_tab_to_right(1).expect("TEST");
+
+    assert_eq!(
+        screen.get_active_tab(1).unwrap().position,
+        1,
+        "Active tab moved to right"
+    );
+}
+
+#[test]
+fn move_of_active_tab_to_right_when_there_is_only_one_tab() {
+    let mut screen = create_fixed_size_screen();
+    new_tab(&mut screen, 1, 0);
+    assert_eq!(screen.get_active_tab(1).unwrap().position, 0);
+
+    screen.move_active_tab_to_right(1).expect("TEST");
+
+    assert_eq!(
+        screen.get_active_tab(1).unwrap().position,
+        0,
+        "Active tab moved to left"
+    );
+}
+
+#[test]
+fn move_of_active_tab_to_right_multiple_times() {
+    let mut screen = create_fixed_size_screen();
+    new_tab(&mut screen, 1, 0);
+    new_tab(&mut screen, 2, 1);
+    new_tab(&mut screen, 3, 2);
+    screen.move_focus_left_or_previous_tab(1).expect("TEST");
+    screen.move_focus_left_or_previous_tab(1).expect("TEST");
+    assert_eq!(screen.get_active_tab(1).unwrap().position, 0);
+
+    screen.move_active_tab_to_right(1).expect("TEST");
+    screen.move_active_tab_to_right(1).expect("TEST");
+
+    assert_eq!(
+        screen.get_active_tab(1).unwrap().position,
+        2,
+        "Active tab moved to right twice"
+    );
+}
+
+#[test]
+fn wrapping_move_of_active_tab_to_right() {
+    let mut screen = create_fixed_size_screen();
+    new_tab(&mut screen, 1, 0);
+    new_tab(&mut screen, 2, 1);
+    new_tab(&mut screen, 3, 2);
+    assert_eq!(screen.get_active_tab(1).unwrap().position, 2);
+
+    screen.move_active_tab_to_right(1).expect("TEST");
+
+    assert_eq!(
+        screen.get_active_tab(1).unwrap().position,
+        0,
+        "Active tab moved to right until wrapped around"
     );
 }
 
@@ -668,7 +987,7 @@ fn move_focus_right_at_right_screen_edge_changes_tab() {
     new_tab(&mut screen, 1, 1);
     new_tab(&mut screen, 2, 2);
     new_tab(&mut screen, 3, 3);
-    screen.switch_tab_prev(None, 1).expect("TEST");
+    screen.switch_tab_prev(None, true, 1).expect("TEST");
     screen.move_focus_right_or_next_tab(1).expect("TEST");
 
     assert_eq!(
@@ -804,7 +1123,7 @@ pub fn toggle_to_previous_tab_delete() {
         "Active tab toggler to previous tab"
     );
 
-    screen.switch_tab_prev(None, 1).expect("TEST");
+    screen.switch_tab_prev(None, true, 1).expect("TEST");
     assert_eq!(
         screen.tab_history.get(&1).unwrap(),
         &[0, 1, 3],
@@ -815,7 +1134,7 @@ pub fn toggle_to_previous_tab_delete() {
         2,
         "Active tab toggler to previous tab"
     );
-    screen.switch_tab_prev(None, 1).expect("TEST");
+    screen.switch_tab_prev(None, true, 1).expect("TEST");
     assert_eq!(
         screen.tab_history.get(&1).unwrap(),
         &[0, 3, 2],
@@ -864,13 +1183,13 @@ fn switch_to_tab_with_fullscreen() {
     {
         let active_tab = screen.get_active_tab_mut(1).unwrap();
         active_tab
-            .new_pane(PaneId::Terminal(2), None, None, Some(1))
+            .new_pane(PaneId::Terminal(2), None, None, None, None, false, Some(1))
             .unwrap();
         active_tab.toggle_active_pane_fullscreen(1);
     }
     new_tab(&mut screen, 2, 2);
 
-    screen.switch_tab_prev(None, 1).expect("TEST");
+    screen.switch_tab_prev(None, true, 1).expect("TEST");
 
     assert_eq!(
         screen.get_active_tab(1).unwrap().position,
@@ -979,7 +1298,7 @@ fn attach_after_first_tab_closed() {
     {
         let active_tab = screen.get_active_tab_mut(1).unwrap();
         active_tab
-            .new_pane(PaneId::Terminal(2), None, None, Some(1))
+            .new_pane(PaneId::Terminal(2), None, None, None, None, false, Some(1))
             .unwrap();
         active_tab.toggle_active_pane_fullscreen(1);
     }
@@ -988,6 +1307,76 @@ fn attach_after_first_tab_closed() {
     screen.close_tab_at_index(0).expect("TEST");
     screen.remove_client(1).expect("TEST");
     screen.add_client(1).expect("TEST");
+}
+
+#[test]
+fn open_new_floating_pane_with_custom_coordinates() {
+    let size = Size {
+        cols: 121,
+        rows: 20,
+    };
+    let mut screen = create_new_screen(size);
+
+    new_tab(&mut screen, 1, 0);
+    let active_tab = screen.get_active_tab_mut(1).unwrap();
+    let should_float = Some(true);
+    active_tab
+        .new_pane(
+            PaneId::Terminal(2),
+            None,
+            should_float,
+            None,
+            Some(FloatingPaneCoordinates {
+                x: Some(SplitSize::Percent(10)),
+                y: Some(SplitSize::Fixed(5)),
+                width: Some(SplitSize::Percent(1)),
+                height: Some(SplitSize::Fixed(2)),
+                pinned: None,
+            }),
+            false,
+            Some(1),
+        )
+        .unwrap();
+    let active_pane = active_tab.get_active_pane(1).unwrap();
+    assert_eq!(active_pane.x(), 12, "x coordinates set properly");
+    assert_eq!(active_pane.y(), 5, "y coordinates set properly");
+    assert_eq!(active_pane.rows(), 2, "rows set properly");
+    assert_eq!(active_pane.cols(), 1, "columns set properly");
+}
+
+#[test]
+fn open_new_floating_pane_with_custom_coordinates_exceeding_viewport() {
+    let size = Size {
+        cols: 121,
+        rows: 20,
+    };
+    let mut screen = create_new_screen(size);
+
+    new_tab(&mut screen, 1, 0);
+    let active_tab = screen.get_active_tab_mut(1).unwrap();
+    let should_float = Some(true);
+    active_tab
+        .new_pane(
+            PaneId::Terminal(2),
+            None,
+            should_float,
+            None,
+            Some(FloatingPaneCoordinates {
+                x: Some(SplitSize::Fixed(122)),
+                y: Some(SplitSize::Fixed(21)),
+                width: Some(SplitSize::Fixed(10)),
+                height: Some(SplitSize::Fixed(10)),
+                pinned: None,
+            }),
+            false,
+            Some(1),
+        )
+        .unwrap();
+    let active_pane = active_tab.get_active_pane(1).unwrap();
+    assert_eq!(active_pane.x(), 111, "x coordinates set properly");
+    assert_eq!(active_pane.y(), 10, "y coordinates set properly");
+    assert_eq!(active_pane.rows(), 10, "rows set properly");
+    assert_eq!(active_pane.cols(), 10, "columns set properly");
 }
 
 // Following are tests for sending CLI actions
@@ -1007,7 +1396,7 @@ pub fn send_cli_write_chars_action_to_screen() {
     let mut mock_screen = MockScreen::new(size);
     let pty_writer_receiver = mock_screen.pty_writer_receiver.take().unwrap();
     let session_metadata = mock_screen.clone_session_metadata();
-    let screen_thread = mock_screen.run(None);
+    let screen_thread = mock_screen.run(None, vec![]);
     let received_pty_instructions = Arc::new(Mutex::new(vec![]));
     let pty_writer_thread = log_actions_in_thread!(
         received_pty_instructions,
@@ -1017,7 +1406,7 @@ pub fn send_cli_write_chars_action_to_screen() {
     let cli_action = CliAction::WriteChars {
         chars: "input from the cli".into(),
     };
-    send_cli_action_to_server(&session_metadata, cli_action, &mut mock_screen, client_id);
+    send_cli_action_to_server(&session_metadata, cli_action, client_id);
     std::thread::sleep(std::time::Duration::from_millis(100)); // give time for actions to be
     mock_screen.teardown(vec![pty_writer_thread, screen_thread]);
     assert_snapshot!(format!("{:?}", *received_pty_instructions.lock().unwrap()));
@@ -1033,7 +1422,7 @@ pub fn send_cli_write_action_to_screen() {
     let mut mock_screen = MockScreen::new(size);
     let pty_writer_receiver = mock_screen.pty_writer_receiver.take().unwrap();
     let session_metadata = mock_screen.clone_session_metadata();
-    let screen_thread = mock_screen.run(None);
+    let screen_thread = mock_screen.run(None, vec![]);
     let received_pty_instructions = Arc::new(Mutex::new(vec![]));
     let pty_writer_thread = log_actions_in_thread!(
         received_pty_instructions,
@@ -1043,7 +1432,7 @@ pub fn send_cli_write_action_to_screen() {
     let cli_action = CliAction::Write {
         bytes: vec![102, 111, 111],
     };
-    send_cli_action_to_server(&session_metadata, cli_action, &mut mock_screen, client_id);
+    send_cli_action_to_server(&session_metadata, cli_action, client_id);
     std::thread::sleep(std::time::Duration::from_millis(100)); // give time for actions to be
     mock_screen.teardown(vec![pty_writer_thread, screen_thread]);
     assert_snapshot!(format!("{:?}", *received_pty_instructions.lock().unwrap()));
@@ -1058,7 +1447,7 @@ pub fn send_cli_resize_action_to_screen() {
     initial_layout.children = vec![TiledPaneLayout::default(), TiledPaneLayout::default()];
     let mut mock_screen = MockScreen::new(size);
     let session_metadata = mock_screen.clone_session_metadata();
-    let screen_thread = mock_screen.run(Some(initial_layout));
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
     let received_server_instructions = Arc::new(Mutex::new(vec![]));
     let server_receiver = mock_screen.server_receiver.take().unwrap();
     let pty_writer_thread = log_actions_in_thread!(
@@ -1070,12 +1459,7 @@ pub fn send_cli_resize_action_to_screen() {
         resize: Resize::Increase,
         direction: Some(Direction::Left),
     };
-    send_cli_action_to_server(
-        &session_metadata,
-        resize_cli_action,
-        &mut mock_screen,
-        client_id,
-    );
+    send_cli_action_to_server(&session_metadata, resize_cli_action, client_id);
     mock_screen.teardown(vec![pty_writer_thread, screen_thread]);
     let snapshots = take_snapshots_and_cursor_coordinates_from_render_events(
         received_server_instructions.lock().unwrap().iter(),
@@ -1097,7 +1481,7 @@ pub fn send_cli_focus_next_pane_action() {
     initial_layout.children = vec![TiledPaneLayout::default(), TiledPaneLayout::default()];
     let mut mock_screen = MockScreen::new(size);
     let session_metadata = mock_screen.clone_session_metadata();
-    let screen_thread = mock_screen.run(Some(initial_layout));
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
     let received_server_instructions = Arc::new(Mutex::new(vec![]));
     let server_receiver = mock_screen.server_receiver.take().unwrap();
     let server_instruction = log_actions_in_thread!(
@@ -1106,12 +1490,7 @@ pub fn send_cli_focus_next_pane_action() {
         server_receiver
     );
     let focus_next_pane_action = CliAction::FocusNextPane;
-    send_cli_action_to_server(
-        &session_metadata,
-        focus_next_pane_action,
-        &mut mock_screen,
-        client_id,
-    );
+    send_cli_action_to_server(&session_metadata, focus_next_pane_action, client_id);
     std::thread::sleep(std::time::Duration::from_millis(100));
     mock_screen.teardown(vec![server_instruction, screen_thread]);
     let snapshots = take_snapshots_and_cursor_coordinates_from_render_events(
@@ -1135,7 +1514,7 @@ pub fn send_cli_focus_previous_pane_action() {
     initial_layout.children = vec![TiledPaneLayout::default(), TiledPaneLayout::default()];
     let mut mock_screen = MockScreen::new(size);
     let session_metadata = mock_screen.clone_session_metadata();
-    let screen_thread = mock_screen.run(Some(initial_layout));
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
     let received_server_instructions = Arc::new(Mutex::new(vec![]));
     let server_receiver = mock_screen.server_receiver.take().unwrap();
     let server_instruction = log_actions_in_thread!(
@@ -1144,12 +1523,7 @@ pub fn send_cli_focus_previous_pane_action() {
         server_receiver
     );
     let focus_next_pane_action = CliAction::FocusPreviousPane;
-    send_cli_action_to_server(
-        &session_metadata,
-        focus_next_pane_action,
-        &mut mock_screen,
-        client_id,
-    );
+    send_cli_action_to_server(&session_metadata, focus_next_pane_action, client_id);
     std::thread::sleep(std::time::Duration::from_millis(100));
     mock_screen.teardown(vec![server_instruction, screen_thread]);
     let snapshots = take_snapshots_and_cursor_coordinates_from_render_events(
@@ -1173,7 +1547,7 @@ pub fn send_cli_move_focus_pane_action() {
     initial_layout.children = vec![TiledPaneLayout::default(), TiledPaneLayout::default()];
     let mut mock_screen = MockScreen::new(size);
     let session_metadata = mock_screen.clone_session_metadata();
-    let screen_thread = mock_screen.run(Some(initial_layout));
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
     let received_server_instructions = Arc::new(Mutex::new(vec![]));
     let server_receiver = mock_screen.server_receiver.take().unwrap();
     let server_instruction = log_actions_in_thread!(
@@ -1184,12 +1558,7 @@ pub fn send_cli_move_focus_pane_action() {
     let move_focus_action = CliAction::MoveFocus {
         direction: Direction::Right,
     };
-    send_cli_action_to_server(
-        &session_metadata,
-        move_focus_action,
-        &mut mock_screen,
-        client_id,
-    );
+    send_cli_action_to_server(&session_metadata, move_focus_action, client_id);
     std::thread::sleep(std::time::Duration::from_millis(100));
     mock_screen.teardown(vec![server_instruction, screen_thread]);
     let snapshots = take_snapshots_and_cursor_coordinates_from_render_events(
@@ -1213,7 +1582,7 @@ pub fn send_cli_move_focus_or_tab_pane_action() {
     initial_layout.children = vec![TiledPaneLayout::default(), TiledPaneLayout::default()];
     let mut mock_screen = MockScreen::new(size);
     let session_metadata = mock_screen.clone_session_metadata();
-    let screen_thread = mock_screen.run(Some(initial_layout));
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
     let received_server_instructions = Arc::new(Mutex::new(vec![]));
     let server_receiver = mock_screen.server_receiver.take().unwrap();
     let server_instruction = log_actions_in_thread!(
@@ -1224,12 +1593,7 @@ pub fn send_cli_move_focus_or_tab_pane_action() {
     let move_focus_action = CliAction::MoveFocusOrTab {
         direction: Direction::Right,
     };
-    send_cli_action_to_server(
-        &session_metadata,
-        move_focus_action,
-        &mut mock_screen,
-        client_id,
-    );
+    send_cli_action_to_server(&session_metadata, move_focus_action, client_id);
     std::thread::sleep(std::time::Duration::from_millis(100));
     mock_screen.teardown(vec![server_instruction, screen_thread]);
     let snapshots = take_snapshots_and_cursor_coordinates_from_render_events(
@@ -1253,7 +1617,7 @@ pub fn send_cli_move_pane_action() {
     initial_layout.children = vec![TiledPaneLayout::default(), TiledPaneLayout::default()];
     let mut mock_screen = MockScreen::new(size);
     let session_metadata = mock_screen.clone_session_metadata();
-    let screen_thread = mock_screen.run(Some(initial_layout));
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
     let received_server_instructions = Arc::new(Mutex::new(vec![]));
     let server_receiver = mock_screen.server_receiver.take().unwrap();
     let server_instruction = log_actions_in_thread!(
@@ -1264,7 +1628,7 @@ pub fn send_cli_move_pane_action() {
     let cli_action = CliAction::MovePane {
         direction: Some(Direction::Right),
     };
-    send_cli_action_to_server(&session_metadata, cli_action, &mut mock_screen, client_id);
+    send_cli_action_to_server(&session_metadata, cli_action, client_id);
     std::thread::sleep(std::time::Duration::from_millis(100));
     mock_screen.teardown(vec![server_instruction, screen_thread]);
     let snapshots = take_snapshots_and_cursor_coordinates_from_render_events(
@@ -1287,7 +1651,7 @@ pub fn send_cli_dump_screen_action() {
     initial_layout.children = vec![TiledPaneLayout::default(), TiledPaneLayout::default()];
     let mut mock_screen = MockScreen::new(size);
     let session_metadata = mock_screen.clone_session_metadata();
-    let screen_thread = mock_screen.run(Some(initial_layout));
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
     let received_server_instructions = Arc::new(Mutex::new(vec![]));
     let server_receiver = mock_screen.server_receiver.take().unwrap();
     let server_thread = log_actions_in_thread!(
@@ -1303,7 +1667,7 @@ pub fn send_cli_dump_screen_action() {
         0,
         "fill pane up with something".as_bytes().to_vec(),
     ));
-    send_cli_action_to_server(&session_metadata, cli_action, &mut mock_screen, client_id);
+    send_cli_action_to_server(&session_metadata, cli_action, client_id);
     std::thread::sleep(std::time::Duration::from_millis(100));
     mock_screen.teardown(vec![server_thread, screen_thread]);
     assert_snapshot!(format!(
@@ -1321,7 +1685,7 @@ pub fn send_cli_edit_scrollback_action() {
     initial_layout.children = vec![TiledPaneLayout::default(), TiledPaneLayout::default()];
     let mut mock_screen = MockScreen::new(size);
     let session_metadata = mock_screen.clone_session_metadata();
-    let screen_thread = mock_screen.run(Some(initial_layout));
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
     let received_pty_instructions = Arc::new(Mutex::new(vec![]));
     let pty_receiver = mock_screen.pty_receiver.take().unwrap();
     let pty_thread = log_actions_in_thread!(
@@ -1334,7 +1698,7 @@ pub fn send_cli_edit_scrollback_action() {
         0,
         "fill pane up with something".as_bytes().to_vec(),
     ));
-    send_cli_action_to_server(&session_metadata, cli_action, &mut mock_screen, client_id);
+    send_cli_action_to_server(&session_metadata, cli_action, client_id);
     std::thread::sleep(std::time::Duration::from_millis(100));
     mock_screen.teardown(vec![pty_thread, screen_thread]);
     let dumped_file_name = mock_screen
@@ -1353,7 +1717,7 @@ pub fn send_cli_edit_scrollback_action() {
         {
             assert_eq!(scrollback_contents_file, &PathBuf::from(&dumped_file_name));
             assert_eq!(terminal_id, &Some(1));
-            assert_eq!(client_id, &1);
+            assert_eq!(client_id, &ClientTabIndexOrPaneId::ClientId(1));
             found_instruction = true;
         }
     }
@@ -1369,7 +1733,7 @@ pub fn send_cli_scroll_up_action() {
     initial_layout.children = vec![TiledPaneLayout::default(), TiledPaneLayout::default()];
     let mut mock_screen = MockScreen::new(size);
     let session_metadata = mock_screen.clone_session_metadata();
-    let screen_thread = mock_screen.run(Some(initial_layout));
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
     let received_server_instructions = Arc::new(Mutex::new(vec![]));
     let server_receiver = mock_screen.server_receiver.take().unwrap();
     let server_instruction = log_actions_in_thread!(
@@ -1389,18 +1753,8 @@ pub fn send_cli_scroll_up_action() {
     std::thread::sleep(std::time::Duration::from_millis(100));
     // we send two actions here because only the last line in the pane is empty, so one action
     // won't show in a render
-    send_cli_action_to_server(
-        &session_metadata,
-        cli_action.clone(),
-        &mut mock_screen,
-        client_id,
-    );
-    send_cli_action_to_server(
-        &session_metadata,
-        cli_action.clone(),
-        &mut mock_screen,
-        client_id,
-    );
+    send_cli_action_to_server(&session_metadata, cli_action.clone(), client_id);
+    send_cli_action_to_server(&session_metadata, cli_action.clone(), client_id);
     std::thread::sleep(std::time::Duration::from_millis(100));
     mock_screen.teardown(vec![server_instruction, screen_thread]);
     let snapshots = take_snapshots_and_cursor_coordinates_from_render_events(
@@ -1423,7 +1777,7 @@ pub fn send_cli_scroll_down_action() {
     initial_layout.children = vec![TiledPaneLayout::default(), TiledPaneLayout::default()];
     let mut mock_screen = MockScreen::new(size);
     let session_metadata = mock_screen.clone_session_metadata();
-    let screen_thread = mock_screen.run(Some(initial_layout));
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
     let received_server_instructions = Arc::new(Mutex::new(vec![]));
     let server_receiver = mock_screen.server_receiver.take().unwrap();
     let server_instruction = log_actions_in_thread!(
@@ -1443,44 +1797,14 @@ pub fn send_cli_scroll_down_action() {
     ));
     std::thread::sleep(std::time::Duration::from_millis(100));
     // scroll up some
-    send_cli_action_to_server(
-        &session_metadata,
-        scroll_up_cli_action.clone(),
-        &mut mock_screen,
-        client_id,
-    );
-    send_cli_action_to_server(
-        &session_metadata,
-        scroll_up_cli_action.clone(),
-        &mut mock_screen,
-        client_id,
-    );
-    send_cli_action_to_server(
-        &session_metadata,
-        scroll_up_cli_action.clone(),
-        &mut mock_screen,
-        client_id,
-    );
-    send_cli_action_to_server(
-        &session_metadata,
-        scroll_up_cli_action.clone(),
-        &mut mock_screen,
-        client_id,
-    );
+    send_cli_action_to_server(&session_metadata, scroll_up_cli_action.clone(), client_id);
+    send_cli_action_to_server(&session_metadata, scroll_up_cli_action.clone(), client_id);
+    send_cli_action_to_server(&session_metadata, scroll_up_cli_action.clone(), client_id);
+    send_cli_action_to_server(&session_metadata, scroll_up_cli_action.clone(), client_id);
 
     // scroll down some
-    send_cli_action_to_server(
-        &session_metadata,
-        scroll_down_cli_action.clone(),
-        &mut mock_screen,
-        client_id,
-    );
-    send_cli_action_to_server(
-        &session_metadata,
-        scroll_down_cli_action.clone(),
-        &mut mock_screen,
-        client_id,
-    );
+    send_cli_action_to_server(&session_metadata, scroll_down_cli_action.clone(), client_id);
+    send_cli_action_to_server(&session_metadata, scroll_down_cli_action.clone(), client_id);
     std::thread::sleep(std::time::Duration::from_millis(100));
     mock_screen.teardown(vec![server_instruction, screen_thread]);
     let snapshots = take_snapshots_and_cursor_coordinates_from_render_events(
@@ -1503,7 +1827,7 @@ pub fn send_cli_scroll_to_bottom_action() {
     initial_layout.children = vec![TiledPaneLayout::default(), TiledPaneLayout::default()];
     let mut mock_screen = MockScreen::new(size);
     let session_metadata = mock_screen.clone_session_metadata();
-    let screen_thread = mock_screen.run(Some(initial_layout));
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
     let received_server_instructions = Arc::new(Mutex::new(vec![]));
     let server_receiver = mock_screen.server_receiver.take().unwrap();
     let server_instruction = log_actions_in_thread!(
@@ -1523,36 +1847,15 @@ pub fn send_cli_scroll_to_bottom_action() {
     ));
     std::thread::sleep(std::time::Duration::from_millis(100));
     // scroll up some
-    send_cli_action_to_server(
-        &session_metadata,
-        scroll_up_cli_action.clone(),
-        &mut mock_screen,
-        client_id,
-    );
-    send_cli_action_to_server(
-        &session_metadata,
-        scroll_up_cli_action.clone(),
-        &mut mock_screen,
-        client_id,
-    );
-    send_cli_action_to_server(
-        &session_metadata,
-        scroll_up_cli_action.clone(),
-        &mut mock_screen,
-        client_id,
-    );
-    send_cli_action_to_server(
-        &session_metadata,
-        scroll_up_cli_action.clone(),
-        &mut mock_screen,
-        client_id,
-    );
+    send_cli_action_to_server(&session_metadata, scroll_up_cli_action.clone(), client_id);
+    send_cli_action_to_server(&session_metadata, scroll_up_cli_action.clone(), client_id);
+    send_cli_action_to_server(&session_metadata, scroll_up_cli_action.clone(), client_id);
+    send_cli_action_to_server(&session_metadata, scroll_up_cli_action.clone(), client_id);
 
     // scroll to bottom
     send_cli_action_to_server(
         &session_metadata,
         scroll_to_bottom_action.clone(),
-        &mut mock_screen,
         client_id,
     );
     std::thread::sleep(std::time::Duration::from_millis(100));
@@ -1577,7 +1880,7 @@ pub fn send_cli_scroll_to_top_action() {
     initial_layout.children = vec![TiledPaneLayout::default(), TiledPaneLayout::default()];
     let mut mock_screen = MockScreen::new(size);
     let session_metadata = mock_screen.clone_session_metadata();
-    let screen_thread = mock_screen.run(Some(initial_layout));
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
     let received_server_instructions = Arc::new(Mutex::new(vec![]));
     let server_receiver = mock_screen.server_receiver.take().unwrap();
     let server_instruction = log_actions_in_thread!(
@@ -1596,12 +1899,7 @@ pub fn send_cli_scroll_to_top_action() {
     ));
     std::thread::sleep(std::time::Duration::from_millis(100));
     // scroll to top
-    send_cli_action_to_server(
-        &session_metadata,
-        scroll_to_top_action.clone(),
-        &mut mock_screen,
-        client_id,
-    );
+    send_cli_action_to_server(&session_metadata, scroll_to_top_action.clone(), client_id);
     std::thread::sleep(std::time::Duration::from_millis(100));
     mock_screen.teardown(vec![server_instruction, screen_thread]);
     let snapshots = take_snapshots_and_cursor_coordinates_from_render_events(
@@ -1624,7 +1922,7 @@ pub fn send_cli_page_scroll_up_action() {
     initial_layout.children = vec![TiledPaneLayout::default(), TiledPaneLayout::default()];
     let mut mock_screen = MockScreen::new(size);
     let session_metadata = mock_screen.clone_session_metadata();
-    let screen_thread = mock_screen.run(Some(initial_layout));
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
     let received_server_instructions = Arc::new(Mutex::new(vec![]));
     let server_receiver = mock_screen.server_receiver.take().unwrap();
     let server_instruction = log_actions_in_thread!(
@@ -1642,12 +1940,7 @@ pub fn send_cli_page_scroll_up_action() {
         pane_contents.as_bytes().to_vec(),
     ));
     std::thread::sleep(std::time::Duration::from_millis(100));
-    send_cli_action_to_server(
-        &session_metadata,
-        page_scroll_up_action,
-        &mut mock_screen,
-        client_id,
-    );
+    send_cli_action_to_server(&session_metadata, page_scroll_up_action, client_id);
     std::thread::sleep(std::time::Duration::from_millis(100));
     mock_screen.teardown(vec![server_instruction, screen_thread]);
     let snapshots = take_snapshots_and_cursor_coordinates_from_render_events(
@@ -1670,7 +1963,7 @@ pub fn send_cli_page_scroll_down_action() {
     initial_layout.children = vec![TiledPaneLayout::default(), TiledPaneLayout::default()];
     let mut mock_screen = MockScreen::new(size);
     let session_metadata = mock_screen.clone_session_metadata();
-    let screen_thread = mock_screen.run(Some(initial_layout));
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
     let received_server_instructions = Arc::new(Mutex::new(vec![]));
     let server_receiver = mock_screen.server_receiver.take().unwrap();
     let server_instruction = log_actions_in_thread!(
@@ -1691,26 +1984,11 @@ pub fn send_cli_page_scroll_down_action() {
     std::thread::sleep(std::time::Duration::from_millis(100));
 
     // scroll up some
-    send_cli_action_to_server(
-        &session_metadata,
-        page_scroll_up_action.clone(),
-        &mut mock_screen,
-        client_id,
-    );
-    send_cli_action_to_server(
-        &session_metadata,
-        page_scroll_up_action.clone(),
-        &mut mock_screen,
-        client_id,
-    );
+    send_cli_action_to_server(&session_metadata, page_scroll_up_action.clone(), client_id);
+    send_cli_action_to_server(&session_metadata, page_scroll_up_action.clone(), client_id);
 
     // scroll down
-    send_cli_action_to_server(
-        &session_metadata,
-        page_scroll_down_action,
-        &mut mock_screen,
-        client_id,
-    );
+    send_cli_action_to_server(&session_metadata, page_scroll_down_action, client_id);
     std::thread::sleep(std::time::Duration::from_millis(100));
     mock_screen.teardown(vec![server_instruction, screen_thread]);
     let snapshots = take_snapshots_and_cursor_coordinates_from_render_events(
@@ -1733,7 +2011,7 @@ pub fn send_cli_half_page_scroll_up_action() {
     initial_layout.children = vec![TiledPaneLayout::default(), TiledPaneLayout::default()];
     let mut mock_screen = MockScreen::new(size);
     let session_metadata = mock_screen.clone_session_metadata();
-    let screen_thread = mock_screen.run(Some(initial_layout));
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
     let received_server_instructions = Arc::new(Mutex::new(vec![]));
     let server_receiver = mock_screen.server_receiver.take().unwrap();
     let server_instruction = log_actions_in_thread!(
@@ -1751,12 +2029,7 @@ pub fn send_cli_half_page_scroll_up_action() {
         pane_contents.as_bytes().to_vec(),
     ));
     std::thread::sleep(std::time::Duration::from_millis(100));
-    send_cli_action_to_server(
-        &session_metadata,
-        half_page_scroll_up_action,
-        &mut mock_screen,
-        client_id,
-    );
+    send_cli_action_to_server(&session_metadata, half_page_scroll_up_action, client_id);
     std::thread::sleep(std::time::Duration::from_millis(100));
     mock_screen.teardown(vec![server_instruction, screen_thread]);
     let snapshots = take_snapshots_and_cursor_coordinates_from_render_events(
@@ -1779,7 +2052,7 @@ pub fn send_cli_half_page_scroll_down_action() {
     initial_layout.children = vec![TiledPaneLayout::default(), TiledPaneLayout::default()];
     let mut mock_screen = MockScreen::new(size);
     let session_metadata = mock_screen.clone_session_metadata();
-    let screen_thread = mock_screen.run(Some(initial_layout));
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
     let received_server_instructions = Arc::new(Mutex::new(vec![]));
     let server_receiver = mock_screen.server_receiver.take().unwrap();
     let server_instruction = log_actions_in_thread!(
@@ -1803,23 +2076,16 @@ pub fn send_cli_half_page_scroll_down_action() {
     send_cli_action_to_server(
         &session_metadata,
         half_page_scroll_up_action.clone(),
-        &mut mock_screen,
         client_id,
     );
     send_cli_action_to_server(
         &session_metadata,
         half_page_scroll_up_action.clone(),
-        &mut mock_screen,
         client_id,
     );
 
     // scroll down
-    send_cli_action_to_server(
-        &session_metadata,
-        half_page_scroll_down_action,
-        &mut mock_screen,
-        client_id,
-    );
+    send_cli_action_to_server(&session_metadata, half_page_scroll_down_action, client_id);
     std::thread::sleep(std::time::Duration::from_millis(100));
     mock_screen.teardown(vec![server_instruction, screen_thread]);
     let snapshots = take_snapshots_and_cursor_coordinates_from_render_events(
@@ -1842,7 +2108,7 @@ pub fn send_cli_toggle_full_screen_action() {
     initial_layout.children = vec![TiledPaneLayout::default(), TiledPaneLayout::default()];
     let mut mock_screen = MockScreen::new(size);
     let session_metadata = mock_screen.clone_session_metadata();
-    let screen_thread = mock_screen.run(Some(initial_layout));
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
     let received_server_instructions = Arc::new(Mutex::new(vec![]));
     let server_receiver = mock_screen.server_receiver.take().unwrap();
     let server_instruction = log_actions_in_thread!(
@@ -1851,12 +2117,7 @@ pub fn send_cli_toggle_full_screen_action() {
         server_receiver
     );
     let toggle_full_screen_action = CliAction::ToggleFullscreen;
-    send_cli_action_to_server(
-        &session_metadata,
-        toggle_full_screen_action,
-        &mut mock_screen,
-        client_id,
-    );
+    send_cli_action_to_server(&session_metadata, toggle_full_screen_action, client_id);
     std::thread::sleep(std::time::Duration::from_millis(100));
     mock_screen.teardown(vec![server_instruction, screen_thread]);
     let snapshots = take_snapshots_and_cursor_coordinates_from_render_events(
@@ -1879,7 +2140,7 @@ pub fn send_cli_toggle_pane_frames_action() {
     initial_layout.children = vec![TiledPaneLayout::default(), TiledPaneLayout::default()];
     let mut mock_screen = MockScreen::new(size);
     let session_metadata = mock_screen.clone_session_metadata();
-    let screen_thread = mock_screen.run(Some(initial_layout));
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
     let received_server_instructions = Arc::new(Mutex::new(vec![]));
     let server_receiver = mock_screen.server_receiver.take().unwrap();
     let server_instruction = log_actions_in_thread!(
@@ -1888,12 +2149,7 @@ pub fn send_cli_toggle_pane_frames_action() {
         server_receiver
     );
     let toggle_pane_frames_action = CliAction::TogglePaneFrames;
-    send_cli_action_to_server(
-        &session_metadata,
-        toggle_pane_frames_action,
-        &mut mock_screen,
-        client_id,
-    );
+    send_cli_action_to_server(&session_metadata, toggle_pane_frames_action, client_id);
     std::thread::sleep(std::time::Duration::from_millis(100));
     mock_screen.teardown(vec![server_instruction, screen_thread]);
     let snapshots = take_snapshots_and_cursor_coordinates_from_render_events(
@@ -1920,7 +2176,7 @@ pub fn send_cli_toggle_active_tab_sync_action() {
     let mut initial_layout = TiledPaneLayout::default();
     initial_layout.children_split_direction = SplitDirection::Vertical;
     initial_layout.children = vec![TiledPaneLayout::default(), TiledPaneLayout::default()];
-    let screen_thread = mock_screen.run(Some(initial_layout));
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
     let received_pty_instructions = Arc::new(Mutex::new(vec![]));
     let pty_writer_thread = log_actions_in_thread!(
         received_pty_instructions,
@@ -1934,15 +2190,9 @@ pub fn send_cli_toggle_active_tab_sync_action() {
     send_cli_action_to_server(
         &session_metadata,
         cli_toggle_active_tab_sync_action,
-        &mut mock_screen,
         client_id,
     );
-    send_cli_action_to_server(
-        &session_metadata,
-        cli_write_action,
-        &mut mock_screen,
-        client_id,
-    );
+    send_cli_action_to_server(&session_metadata, cli_write_action, client_id);
     std::thread::sleep(std::time::Duration::from_millis(100)); // give time for actions to be
     mock_screen.teardown(vec![pty_writer_thread, screen_thread]);
     assert_snapshot!(format!("{:?}", *received_pty_instructions.lock().unwrap()));
@@ -1961,7 +2211,7 @@ pub fn send_cli_new_pane_action_with_default_parameters() {
     let mut initial_layout = TiledPaneLayout::default();
     initial_layout.children_split_direction = SplitDirection::Vertical;
     initial_layout.children = vec![TiledPaneLayout::default(), TiledPaneLayout::default()];
-    let screen_thread = mock_screen.run(Some(initial_layout));
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
     let received_pty_instructions = Arc::new(Mutex::new(vec![]));
     let pty_thread = log_actions_in_thread!(
         received_pty_instructions,
@@ -1974,16 +2224,19 @@ pub fn send_cli_new_pane_action_with_default_parameters() {
         plugin: None,
         cwd: None,
         floating: false,
+        in_place: false,
         name: None,
         close_on_exit: false,
         start_suspended: false,
+        configuration: None,
+        skip_plugin_cache: false,
+        x: None,
+        y: None,
+        width: None,
+        height: None,
+        pinned: None,
     };
-    send_cli_action_to_server(
-        &session_metadata,
-        cli_new_pane_action,
-        &mut mock_screen,
-        client_id,
-    );
+    send_cli_action_to_server(&session_metadata, cli_new_pane_action, client_id);
     std::thread::sleep(std::time::Duration::from_millis(100)); // give time for actions to be
     mock_screen.teardown(vec![pty_thread, screen_thread]);
     assert_snapshot!(format!("{:?}", *received_pty_instructions.lock().unwrap()));
@@ -2002,7 +2255,7 @@ pub fn send_cli_new_pane_action_with_split_direction() {
     let mut initial_layout = TiledPaneLayout::default();
     initial_layout.children_split_direction = SplitDirection::Vertical;
     initial_layout.children = vec![TiledPaneLayout::default(), TiledPaneLayout::default()];
-    let screen_thread = mock_screen.run(Some(initial_layout));
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
     let received_pty_instructions = Arc::new(Mutex::new(vec![]));
     let pty_thread = log_actions_in_thread!(
         received_pty_instructions,
@@ -2015,16 +2268,19 @@ pub fn send_cli_new_pane_action_with_split_direction() {
         plugin: None,
         cwd: None,
         floating: false,
+        in_place: false,
         name: None,
         close_on_exit: false,
         start_suspended: false,
+        configuration: None,
+        skip_plugin_cache: false,
+        x: None,
+        y: None,
+        width: None,
+        height: None,
+        pinned: None,
     };
-    send_cli_action_to_server(
-        &session_metadata,
-        cli_new_pane_action,
-        &mut mock_screen,
-        client_id,
-    );
+    send_cli_action_to_server(&session_metadata, cli_new_pane_action, client_id);
     std::thread::sleep(std::time::Duration::from_millis(100)); // give time for actions to be
     mock_screen.teardown(vec![pty_thread, screen_thread]);
     assert_snapshot!(format!("{:?}", *received_pty_instructions.lock().unwrap()));
@@ -2043,7 +2299,7 @@ pub fn send_cli_new_pane_action_with_command_and_cwd() {
     let mut initial_layout = TiledPaneLayout::default();
     initial_layout.children_split_direction = SplitDirection::Vertical;
     initial_layout.children = vec![TiledPaneLayout::default(), TiledPaneLayout::default()];
-    let screen_thread = mock_screen.run(Some(initial_layout));
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
     let received_pty_instructions = Arc::new(Mutex::new(vec![]));
     let pty_thread = log_actions_in_thread!(
         received_pty_instructions,
@@ -2056,16 +2312,74 @@ pub fn send_cli_new_pane_action_with_command_and_cwd() {
         plugin: None,
         cwd: Some("/some/folder".into()),
         floating: false,
+        in_place: false,
         name: None,
         close_on_exit: false,
         start_suspended: false,
+        configuration: None,
+        skip_plugin_cache: false,
+        x: None,
+        y: None,
+        width: None,
+        height: None,
+        pinned: None,
     };
-    send_cli_action_to_server(
-        &session_metadata,
-        cli_new_pane_action,
-        &mut mock_screen,
-        client_id,
+    send_cli_action_to_server(&session_metadata, cli_new_pane_action, client_id);
+    std::thread::sleep(std::time::Duration::from_millis(100)); // give time for actions to be
+    mock_screen.teardown(vec![pty_thread, screen_thread]);
+
+    let new_pane_instruction = received_pty_instructions
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|instruction| match instruction {
+            PtyInstruction::SpawnTerminalVertically(..) => true,
+            _ => false,
+        })
+        .cloned();
+
+    assert_snapshot!(format!("{:?}", new_pane_instruction));
+}
+
+#[test]
+pub fn send_cli_new_pane_action_with_floating_pane_and_coordinates() {
+    let size = Size {
+        cols: 121,
+        rows: 20,
+    };
+    let client_id = 10; // fake client id should not appear in the screen's state
+    let mut mock_screen = MockScreen::new(size);
+    let pty_receiver = mock_screen.pty_receiver.take().unwrap();
+    let session_metadata = mock_screen.clone_session_metadata();
+    let mut initial_layout = TiledPaneLayout::default();
+    initial_layout.children_split_direction = SplitDirection::Vertical;
+    initial_layout.children = vec![TiledPaneLayout::default(), TiledPaneLayout::default()];
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
+    let received_pty_instructions = Arc::new(Mutex::new(vec![]));
+    let pty_thread = log_actions_in_thread!(
+        received_pty_instructions,
+        PtyInstruction::Exit,
+        pty_receiver
     );
+    let cli_new_pane_action = CliAction::NewPane {
+        direction: Some(Direction::Right),
+        command: vec!["htop".into()],
+        plugin: None,
+        cwd: Some("/some/folder".into()),
+        floating: true,
+        in_place: false,
+        name: None,
+        close_on_exit: false,
+        start_suspended: false,
+        configuration: None,
+        skip_plugin_cache: false,
+        x: Some("10".to_owned()),
+        y: None,
+        width: Some("20%".to_owned()),
+        height: None,
+        pinned: None,
+    };
+    send_cli_action_to_server(&session_metadata, cli_new_pane_action, client_id);
     std::thread::sleep(std::time::Duration::from_millis(100)); // give time for actions to be
     mock_screen.teardown(vec![pty_thread, screen_thread]);
     assert_snapshot!(format!("{:?}", *received_pty_instructions.lock().unwrap()));
@@ -2084,7 +2398,7 @@ pub fn send_cli_edit_action_with_default_parameters() {
     let mut initial_layout = TiledPaneLayout::default();
     initial_layout.children_split_direction = SplitDirection::Vertical;
     initial_layout.children = vec![TiledPaneLayout::default(), TiledPaneLayout::default()];
-    let screen_thread = mock_screen.run(Some(initial_layout));
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
     let received_pty_instructions = Arc::new(Mutex::new(vec![]));
     let pty_thread = log_actions_in_thread!(
         received_pty_instructions,
@@ -2096,14 +2410,15 @@ pub fn send_cli_edit_action_with_default_parameters() {
         direction: None,
         line_number: None,
         floating: false,
+        in_place: false,
         cwd: None,
+        x: None,
+        y: None,
+        width: None,
+        height: None,
+        pinned: None,
     };
-    send_cli_action_to_server(
-        &session_metadata,
-        cli_edit_action,
-        &mut mock_screen,
-        client_id,
-    );
+    send_cli_action_to_server(&session_metadata, cli_edit_action, client_id);
     std::thread::sleep(std::time::Duration::from_millis(100)); // give time for actions to be
     mock_screen.teardown(vec![pty_thread, screen_thread]);
     assert_snapshot!(format!("{:?}", *received_pty_instructions.lock().unwrap()));
@@ -2122,7 +2437,7 @@ pub fn send_cli_edit_action_with_line_number() {
     let mut initial_layout = TiledPaneLayout::default();
     initial_layout.children_split_direction = SplitDirection::Vertical;
     initial_layout.children = vec![TiledPaneLayout::default(), TiledPaneLayout::default()];
-    let screen_thread = mock_screen.run(Some(initial_layout));
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
     let received_pty_instructions = Arc::new(Mutex::new(vec![]));
     let pty_thread = log_actions_in_thread!(
         received_pty_instructions,
@@ -2134,14 +2449,15 @@ pub fn send_cli_edit_action_with_line_number() {
         direction: None,
         line_number: Some(100),
         floating: false,
+        in_place: false,
         cwd: None,
+        x: None,
+        y: None,
+        width: None,
+        height: None,
+        pinned: None,
     };
-    send_cli_action_to_server(
-        &session_metadata,
-        cli_edit_action,
-        &mut mock_screen,
-        client_id,
-    );
+    send_cli_action_to_server(&session_metadata, cli_edit_action, client_id);
     std::thread::sleep(std::time::Duration::from_millis(100)); // give time for actions to be
     mock_screen.teardown(vec![pty_thread, screen_thread]);
     assert_snapshot!(format!("{:?}", *received_pty_instructions.lock().unwrap()));
@@ -2160,7 +2476,7 @@ pub fn send_cli_edit_action_with_split_direction() {
     let mut initial_layout = TiledPaneLayout::default();
     initial_layout.children_split_direction = SplitDirection::Vertical;
     initial_layout.children = vec![TiledPaneLayout::default(), TiledPaneLayout::default()];
-    let screen_thread = mock_screen.run(Some(initial_layout));
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
     let received_pty_instructions = Arc::new(Mutex::new(vec![]));
     let pty_thread = log_actions_in_thread!(
         received_pty_instructions,
@@ -2172,14 +2488,15 @@ pub fn send_cli_edit_action_with_split_direction() {
         direction: Some(Direction::Down),
         line_number: None,
         floating: false,
+        in_place: false,
         cwd: None,
+        x: None,
+        y: None,
+        width: None,
+        height: None,
+        pinned: None,
     };
-    send_cli_action_to_server(
-        &session_metadata,
-        cli_edit_action,
-        &mut mock_screen,
-        client_id,
-    );
+    send_cli_action_to_server(&session_metadata, cli_edit_action, client_id);
     std::thread::sleep(std::time::Duration::from_millis(100)); // give time for actions to be
     mock_screen.teardown(vec![pty_thread, screen_thread]);
     assert_snapshot!(format!("{:?}", *received_pty_instructions.lock().unwrap()));
@@ -2187,36 +2504,41 @@ pub fn send_cli_edit_action_with_split_direction() {
 
 #[test]
 pub fn send_cli_switch_mode_action() {
-    let size = Size {
-        cols: 121,
-        rows: 20,
-    };
+    let size = Size { cols: 80, rows: 10 };
     let client_id = 10; // fake client id should not appear in the screen's state
-    let mut mock_screen = MockScreen::new(size);
-    let session_metadata = mock_screen.clone_session_metadata();
     let mut initial_layout = TiledPaneLayout::default();
     initial_layout.children_split_direction = SplitDirection::Vertical;
     initial_layout.children = vec![TiledPaneLayout::default(), TiledPaneLayout::default()];
-    let screen_thread = mock_screen.run(Some(initial_layout));
+    let mut mock_screen = MockScreen::new(size);
+    let session_metadata = mock_screen.clone_session_metadata();
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
+    let received_server_instructions = Arc::new(Mutex::new(vec![]));
+    let server_receiver = mock_screen.server_receiver.take().unwrap();
+    let server_instruction = log_actions_in_thread!(
+        received_server_instructions,
+        ServerInstruction::KillSession,
+        server_receiver
+    );
+
     let cli_switch_mode = CliAction::SwitchMode {
         input_mode: InputMode::Locked,
     };
-    send_cli_action_to_server(
-        &session_metadata,
-        cli_switch_mode,
-        &mut mock_screen,
-        client_id,
-    );
-    std::thread::sleep(std::time::Duration::from_millis(100)); // give time for actions to be
-    mock_screen.teardown(vec![screen_thread]);
-    assert_snapshot!(format!(
-        "{:?}",
-        *mock_screen
-            .os_input
-            .server_to_client_messages
-            .lock()
-            .unwrap()
-    ));
+    send_cli_action_to_server(&session_metadata, cli_switch_mode, client_id);
+
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    mock_screen.teardown(vec![server_instruction, screen_thread]);
+
+    let switch_mode_action = received_server_instructions
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|instruction| match instruction {
+            ServerInstruction::ChangeModeForAllClients(..) => true,
+            _ => false,
+        })
+        .cloned();
+
+    assert_snapshot!(format!("{:?}", switch_mode_action));
 }
 
 #[test]
@@ -2228,7 +2550,7 @@ pub fn send_cli_toggle_pane_embed_or_float() {
     initial_layout.children = vec![TiledPaneLayout::default(), TiledPaneLayout::default()];
     let mut mock_screen = MockScreen::new(size);
     let session_metadata = mock_screen.clone_session_metadata();
-    let screen_thread = mock_screen.run(Some(initial_layout));
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
     let received_server_instructions = Arc::new(Mutex::new(vec![]));
     let server_receiver = mock_screen.server_receiver.take().unwrap();
     let server_instruction = log_actions_in_thread!(
@@ -2241,7 +2563,6 @@ pub fn send_cli_toggle_pane_embed_or_float() {
     send_cli_action_to_server(
         &session_metadata,
         toggle_pane_embed_or_floating.clone(),
-        &mut mock_screen,
         client_id,
     );
     std::thread::sleep(std::time::Duration::from_millis(100));
@@ -2249,7 +2570,6 @@ pub fn send_cli_toggle_pane_embed_or_float() {
     send_cli_action_to_server(
         &session_metadata,
         toggle_pane_embed_or_floating.clone(),
-        &mut mock_screen,
         client_id,
     );
     std::thread::sleep(std::time::Duration::from_millis(100));
@@ -2274,7 +2594,7 @@ pub fn send_cli_toggle_floating_panes() {
     initial_layout.children = vec![TiledPaneLayout::default(), TiledPaneLayout::default()];
     let mut mock_screen = MockScreen::new(size);
     let session_metadata = mock_screen.clone_session_metadata();
-    let screen_thread = mock_screen.run(Some(initial_layout));
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
     let received_server_instructions = Arc::new(Mutex::new(vec![]));
     let server_receiver = mock_screen.server_receiver.take().unwrap();
     let server_instruction = log_actions_in_thread!(
@@ -2285,28 +2605,13 @@ pub fn send_cli_toggle_floating_panes() {
     let toggle_pane_embed_or_floating = CliAction::TogglePaneEmbedOrFloating;
     let toggle_floating_panes = CliAction::ToggleFloatingPanes;
     // float the focused pane
-    send_cli_action_to_server(
-        &session_metadata,
-        toggle_pane_embed_or_floating,
-        &mut mock_screen,
-        client_id,
-    );
+    send_cli_action_to_server(&session_metadata, toggle_pane_embed_or_floating, client_id);
     std::thread::sleep(std::time::Duration::from_millis(100));
     // toggle floating panes (will hide the floated pane from the previous action)
-    send_cli_action_to_server(
-        &session_metadata,
-        toggle_floating_panes.clone(),
-        &mut mock_screen,
-        client_id,
-    );
+    send_cli_action_to_server(&session_metadata, toggle_floating_panes.clone(), client_id);
     std::thread::sleep(std::time::Duration::from_millis(100));
     // toggle floating panes (will show the floated pane)
-    send_cli_action_to_server(
-        &session_metadata,
-        toggle_floating_panes.clone(),
-        &mut mock_screen,
-        client_id,
-    );
+    send_cli_action_to_server(&session_metadata, toggle_floating_panes.clone(), client_id);
     std::thread::sleep(std::time::Duration::from_millis(100));
     mock_screen.teardown(vec![server_instruction, screen_thread]);
     let snapshots = take_snapshots_and_cursor_coordinates_from_render_events(
@@ -2329,7 +2634,7 @@ pub fn send_cli_close_pane_action() {
     initial_layout.children = vec![TiledPaneLayout::default(), TiledPaneLayout::default()];
     let mut mock_screen = MockScreen::new(size);
     let session_metadata = mock_screen.clone_session_metadata();
-    let screen_thread = mock_screen.run(Some(initial_layout));
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
     let received_server_instructions = Arc::new(Mutex::new(vec![]));
     let server_receiver = mock_screen.server_receiver.take().unwrap();
     let server_instruction = log_actions_in_thread!(
@@ -2338,12 +2643,7 @@ pub fn send_cli_close_pane_action() {
         server_receiver
     );
     let close_pane_action = CliAction::ClosePane;
-    send_cli_action_to_server(
-        &session_metadata,
-        close_pane_action,
-        &mut mock_screen,
-        client_id,
-    );
+    send_cli_action_to_server(&session_metadata, close_pane_action, client_id);
     std::thread::sleep(std::time::Duration::from_millis(100));
     mock_screen.teardown(vec![server_instruction, screen_thread]);
     let snapshots = take_snapshots_and_cursor_coordinates_from_render_events(
@@ -2366,7 +2666,7 @@ pub fn send_cli_new_tab_action_default_params() {
     initial_layout.children = vec![TiledPaneLayout::default(), TiledPaneLayout::default()];
     let mut mock_screen = MockScreen::new(size);
     let session_metadata = mock_screen.clone_session_metadata();
-    let screen_thread = mock_screen.run(Some(initial_layout));
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
     let received_plugin_instructions = Arc::new(Mutex::new(vec![]));
     let plugin_receiver = mock_screen.plugin_receiver.take().unwrap();
     let plugin_thread = log_actions_in_thread!(
@@ -2380,12 +2680,7 @@ pub fn send_cli_new_tab_action_default_params() {
         layout_dir: None,
         cwd: None,
     };
-    send_cli_action_to_server(
-        &session_metadata,
-        new_tab_action,
-        &mut mock_screen,
-        client_id,
-    );
+    send_cli_action_to_server(&session_metadata, new_tab_action, client_id);
     std::thread::sleep(std::time::Duration::from_millis(100));
     mock_screen.teardown(vec![plugin_thread, screen_thread]);
     let received_plugin_instructions = received_plugin_instructions.lock().unwrap();
@@ -2408,7 +2703,7 @@ pub fn send_cli_new_tab_action_with_name_and_layout() {
     initial_layout.children = vec![TiledPaneLayout::default(), TiledPaneLayout::default()];
     let mut mock_screen = MockScreen::new(size);
     let session_metadata = mock_screen.clone_session_metadata();
-    let screen_thread = mock_screen.run(Some(initial_layout));
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
     let received_plugin_instructions = Arc::new(Mutex::new(vec![]));
     let plugin_receiver = mock_screen.plugin_receiver.take().unwrap();
     let plugin_thread = log_actions_in_thread!(
@@ -2425,12 +2720,7 @@ pub fn send_cli_new_tab_action_with_name_and_layout() {
         layout_dir: None,
         cwd: None,
     };
-    send_cli_action_to_server(
-        &session_metadata,
-        new_tab_action,
-        &mut mock_screen,
-        client_id,
-    );
+    send_cli_action_to_server(&session_metadata, new_tab_action, client_id);
     std::thread::sleep(std::time::Duration::from_millis(100));
     mock_screen.teardown(vec![plugin_thread, screen_thread]);
     let new_tab_instruction = received_plugin_instructions
@@ -2463,7 +2753,7 @@ pub fn send_cli_next_tab_action() {
     let mut mock_screen = MockScreen::new(size);
     mock_screen.new_tab(second_tab_layout);
     let session_metadata = mock_screen.clone_session_metadata();
-    let screen_thread = mock_screen.run(Some(initial_layout));
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
     let received_server_instructions = Arc::new(Mutex::new(vec![]));
     let server_receiver = mock_screen.server_receiver.take().unwrap();
     let server_thread = log_actions_in_thread!(
@@ -2472,12 +2762,7 @@ pub fn send_cli_next_tab_action() {
         server_receiver
     );
     let goto_next_tab = CliAction::GoToNextTab;
-    send_cli_action_to_server(
-        &session_metadata,
-        goto_next_tab,
-        &mut mock_screen,
-        client_id,
-    );
+    send_cli_action_to_server(&session_metadata, goto_next_tab, client_id);
     std::thread::sleep(std::time::Duration::from_millis(100));
     mock_screen.teardown(vec![server_thread, screen_thread]);
     let snapshots = take_snapshots_and_cursor_coordinates_from_render_events(
@@ -2504,7 +2789,7 @@ pub fn send_cli_previous_tab_action() {
     let mut mock_screen = MockScreen::new(size);
     mock_screen.new_tab(second_tab_layout);
     let session_metadata = mock_screen.clone_session_metadata();
-    let screen_thread = mock_screen.run(Some(initial_layout));
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
     let received_server_instructions = Arc::new(Mutex::new(vec![]));
     let server_receiver = mock_screen.server_receiver.take().unwrap();
     let server_thread = log_actions_in_thread!(
@@ -2513,12 +2798,7 @@ pub fn send_cli_previous_tab_action() {
         server_receiver
     );
     let goto_previous_tab = CliAction::GoToPreviousTab;
-    send_cli_action_to_server(
-        &session_metadata,
-        goto_previous_tab,
-        &mut mock_screen,
-        client_id,
-    );
+    send_cli_action_to_server(&session_metadata, goto_previous_tab, client_id);
     std::thread::sleep(std::time::Duration::from_millis(100));
     mock_screen.teardown(vec![server_thread, screen_thread]);
     let snapshots = take_snapshots_and_cursor_coordinates_from_render_events(
@@ -2545,7 +2825,7 @@ pub fn send_cli_goto_tab_action() {
     let mut mock_screen = MockScreen::new(size);
     mock_screen.new_tab(second_tab_layout);
     let session_metadata = mock_screen.clone_session_metadata();
-    let screen_thread = mock_screen.run(Some(initial_layout));
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
     let received_server_instructions = Arc::new(Mutex::new(vec![]));
     let server_receiver = mock_screen.server_receiver.take().unwrap();
     let server_thread = log_actions_in_thread!(
@@ -2554,7 +2834,7 @@ pub fn send_cli_goto_tab_action() {
         server_receiver
     );
     let goto_tab = CliAction::GoToTab { index: 1 };
-    send_cli_action_to_server(&session_metadata, goto_tab, &mut mock_screen, client_id);
+    send_cli_action_to_server(&session_metadata, goto_tab, client_id);
     std::thread::sleep(std::time::Duration::from_millis(100));
     mock_screen.teardown(vec![server_thread, screen_thread]);
     let snapshots = take_snapshots_and_cursor_coordinates_from_render_events(
@@ -2581,7 +2861,7 @@ pub fn send_cli_close_tab_action() {
     let mut mock_screen = MockScreen::new(size);
     mock_screen.new_tab(second_tab_layout);
     let session_metadata = mock_screen.clone_session_metadata();
-    let screen_thread = mock_screen.run(Some(initial_layout));
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
     let received_server_instructions = Arc::new(Mutex::new(vec![]));
     let server_receiver = mock_screen.server_receiver.take().unwrap();
     let server_thread = log_actions_in_thread!(
@@ -2590,7 +2870,7 @@ pub fn send_cli_close_tab_action() {
         server_receiver
     );
     let close_tab = CliAction::CloseTab;
-    send_cli_action_to_server(&session_metadata, close_tab, &mut mock_screen, client_id);
+    send_cli_action_to_server(&session_metadata, close_tab, client_id);
     std::thread::sleep(std::time::Duration::from_millis(100));
     mock_screen.teardown(vec![server_thread, screen_thread]);
     let snapshots = take_snapshots_and_cursor_coordinates_from_render_events(
@@ -2617,7 +2897,7 @@ pub fn send_cli_rename_tab() {
     let mut mock_screen = MockScreen::new(size);
     mock_screen.new_tab(second_tab_layout);
     let session_metadata = mock_screen.clone_session_metadata();
-    let screen_thread = mock_screen.run(Some(initial_layout));
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
     let received_plugin_instructions = Arc::new(Mutex::new(vec![]));
     let plugin_receiver = mock_screen.plugin_receiver.take().unwrap();
     let plugin_thread = log_actions_in_thread!(
@@ -2628,13 +2908,25 @@ pub fn send_cli_rename_tab() {
     let rename_tab = CliAction::RenameTab {
         name: "new-tab-name".into(),
     };
-    send_cli_action_to_server(&session_metadata, rename_tab, &mut mock_screen, client_id);
+    send_cli_action_to_server(&session_metadata, rename_tab, client_id);
     std::thread::sleep(std::time::Duration::from_millis(100));
     mock_screen.teardown(vec![plugin_thread, screen_thread]);
-    assert_snapshot!(format!(
-        "{:#?}",
-        *received_plugin_instructions.lock().unwrap()
-    ))
+    let plugin_rename_tab_instruction = received_plugin_instructions
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|instruction| match instruction {
+            PluginInstruction::Update(updates) => updates
+                .iter()
+                .find(|u| match u {
+                    (_, _, Event::TabUpdate(..)) => true,
+                    _ => false,
+                })
+                .is_some(),
+            _ => false,
+        })
+        .cloned();
+    assert_snapshot!(format!("{:#?}", plugin_rename_tab_instruction))
 }
 
 #[test]
@@ -2650,7 +2942,7 @@ pub fn send_cli_undo_rename_tab() {
     let mut mock_screen = MockScreen::new(size);
     mock_screen.new_tab(second_tab_layout);
     let session_metadata = mock_screen.clone_session_metadata();
-    let screen_thread = mock_screen.run(Some(initial_layout));
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
     let received_plugin_instructions = Arc::new(Mutex::new(vec![]));
     let plugin_receiver = mock_screen.plugin_receiver.take().unwrap();
     let plugin_thread = log_actions_in_thread!(
@@ -2663,21 +2955,28 @@ pub fn send_cli_undo_rename_tab() {
     };
     let undo_rename_tab = CliAction::UndoRenameTab;
     // first rename the tab
-    send_cli_action_to_server(&session_metadata, rename_tab, &mut mock_screen, client_id);
+    send_cli_action_to_server(&session_metadata, rename_tab, client_id);
     std::thread::sleep(std::time::Duration::from_millis(100));
     // then undo the tab rename to go back to the default name
-    send_cli_action_to_server(
-        &session_metadata,
-        undo_rename_tab,
-        &mut mock_screen,
-        client_id,
-    );
+    send_cli_action_to_server(&session_metadata, undo_rename_tab, client_id);
     std::thread::sleep(std::time::Duration::from_millis(100));
     mock_screen.teardown(vec![plugin_thread, screen_thread]);
-    assert_snapshot!(format!(
-        "{:#?}",
-        *received_plugin_instructions.lock().unwrap()
-    ))
+    let plugin_undo_rename_tab_instruction = received_plugin_instructions
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|instruction| match instruction {
+            PluginInstruction::Update(updates) => updates
+                .iter()
+                .find(|u| match u {
+                    (_, _, Event::TabUpdate(..)) => true,
+                    _ => false,
+                })
+                .is_some(),
+            _ => false,
+        })
+        .cloned();
+    assert_snapshot!(format!("{:#?}", plugin_undo_rename_tab_instruction))
 }
 
 #[test]
@@ -2687,7 +2986,7 @@ pub fn send_cli_query_tab_names_action() {
     let mut mock_screen = MockScreen::new(size);
     mock_screen.new_tab(TiledPaneLayout::default());
     let session_metadata = mock_screen.clone_session_metadata();
-    let screen_thread = mock_screen.run(Some(TiledPaneLayout::default()));
+    let screen_thread = mock_screen.run(Some(TiledPaneLayout::default()), vec![]);
     let received_server_instructions = Arc::new(Mutex::new(vec![]));
     let server_receiver = mock_screen.server_receiver.take().unwrap();
     let server_thread = log_actions_in_thread!(
@@ -2696,12 +2995,7 @@ pub fn send_cli_query_tab_names_action() {
         server_receiver
     );
     let query_tab_names = CliAction::QueryTabNames;
-    send_cli_action_to_server(
-        &session_metadata,
-        query_tab_names,
-        &mut mock_screen,
-        client_id,
-    );
+    send_cli_action_to_server(&session_metadata, query_tab_names, client_id);
     std::thread::sleep(std::time::Duration::from_millis(100));
     mock_screen.teardown(vec![server_thread, screen_thread]);
     let log_tab_names_instruction = received_server_instructions
@@ -2714,4 +3008,728 @@ pub fn send_cli_query_tab_names_action() {
         })
         .cloned();
     assert_snapshot!(format!("{:#?}", log_tab_names_instruction));
+}
+
+#[test]
+pub fn send_cli_launch_or_focus_plugin_action() {
+    let size = Size {
+        cols: 121,
+        rows: 20,
+    };
+    let client_id = 10; // fake client id should not appear in the screen's state
+    let mut mock_screen = MockScreen::new(size);
+    let pty_receiver = mock_screen.pty_receiver.take().unwrap();
+    let session_metadata = mock_screen.clone_session_metadata();
+    let screen_thread = mock_screen.run(None, vec![]);
+    let received_pty_instructions = Arc::new(Mutex::new(vec![]));
+    let pty_thread = log_actions_in_thread!(
+        received_pty_instructions,
+        PtyInstruction::Exit,
+        pty_receiver
+    );
+    let cli_action = CliAction::LaunchOrFocusPlugin {
+        floating: true,
+        in_place: false,
+        move_to_focused_tab: true,
+        url: "file:/path/to/fake/plugin".to_owned(),
+        configuration: Default::default(),
+        skip_plugin_cache: false,
+    };
+    send_cli_action_to_server(&session_metadata, cli_action, client_id);
+    std::thread::sleep(std::time::Duration::from_millis(100)); // give time for actions to be
+    mock_screen.teardown(vec![pty_thread, screen_thread]);
+
+    let pty_fill_plugin_cwd_instruction = received_pty_instructions
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|instruction| match instruction {
+            PtyInstruction::FillPluginCwd(..) => true,
+            _ => false,
+        })
+        .cloned();
+
+    assert_snapshot!(format!("{:#?}", pty_fill_plugin_cwd_instruction));
+}
+
+#[test]
+pub fn send_cli_launch_or_focus_plugin_action_when_plugin_is_already_loaded() {
+    let size = Size {
+        cols: 121,
+        rows: 20,
+    };
+    let client_id = 10; // fake client id should not appear in the screen's state
+    let mut mock_screen = MockScreen::new(size);
+    let plugin_receiver = mock_screen.plugin_receiver.take().unwrap();
+    let session_metadata = mock_screen.clone_session_metadata();
+    let mut initial_layout = TiledPaneLayout::default();
+    let existing_plugin_pane = TiledPaneLayout {
+        run: Some(Run::Plugin(RunPluginOrAlias::RunPlugin(RunPlugin {
+            _allow_exec_host_cmd: false,
+            location: RunPluginLocation::File(PathBuf::from("/path/to/fake/plugin")),
+            configuration: Default::default(),
+            ..Default::default()
+        }))),
+        ..Default::default()
+    };
+    initial_layout.children_split_direction = SplitDirection::Vertical;
+    initial_layout.children = vec![TiledPaneLayout::default(), existing_plugin_pane];
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
+    let received_plugin_instructions = Arc::new(Mutex::new(vec![]));
+    let plugin_thread = log_actions_in_thread!(
+        received_plugin_instructions,
+        PluginInstruction::Exit,
+        plugin_receiver
+    );
+    let received_server_instructions = Arc::new(Mutex::new(vec![]));
+    let server_receiver = mock_screen.server_receiver.take().unwrap();
+    let server_thread = log_actions_in_thread!(
+        received_server_instructions,
+        ServerInstruction::KillSession,
+        server_receiver
+    );
+    let cli_action = CliAction::LaunchOrFocusPlugin {
+        floating: true,
+        in_place: false,
+        move_to_focused_tab: true,
+        url: "file:/path/to/fake/plugin".to_owned(),
+        configuration: Default::default(),
+        skip_plugin_cache: false,
+    };
+    send_cli_action_to_server(&session_metadata, cli_action, client_id);
+    std::thread::sleep(std::time::Duration::from_millis(100)); // give time for actions to be
+    mock_screen.teardown(vec![plugin_thread, server_thread, screen_thread]);
+
+    let plugin_load_instruction_sent = received_plugin_instructions
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|instruction| match instruction {
+            PluginInstruction::Load(..) => true,
+            _ => false,
+        })
+        .is_some();
+    assert!(
+        !plugin_load_instruction_sent,
+        "Plugin Load instruction should not be sent for an already loaded plugin"
+    );
+    let snapshots = take_snapshots_and_cursor_coordinates_from_render_events(
+        received_server_instructions.lock().unwrap().iter(),
+        size,
+    );
+    let snapshot_count = snapshots.len();
+    assert_eq!(
+        snapshot_count, 2,
+        "Another render was sent for focusing the already loaded plugin"
+    );
+    for (cursor_coordinates, _snapshot) in snapshots.iter().skip(1) {
+        assert!(
+            cursor_coordinates.is_none(),
+            "Cursor moved to existing plugin in final snapshot indicating focus changed"
+        );
+    }
+}
+
+#[test]
+pub fn send_cli_launch_or_focus_plugin_action_when_plugin_is_already_loaded_for_plugin_alias() {
+    let size = Size {
+        cols: 121,
+        rows: 20,
+    };
+    let client_id = 10; // fake client id should not appear in the screen's state
+    let mut mock_screen = MockScreen::new(size);
+    let plugin_receiver = mock_screen.plugin_receiver.take().unwrap();
+    let session_metadata = mock_screen.clone_session_metadata();
+    let mut initial_layout = TiledPaneLayout::default();
+    let existing_plugin_pane = TiledPaneLayout {
+        run: Some(Run::Plugin(RunPluginOrAlias::Alias(PluginAlias {
+            name: "fixture_plugin_for_tests".to_owned(),
+            configuration: Some(Default::default()),
+            run_plugin: Some(RunPlugin {
+                _allow_exec_host_cmd: false,
+                location: RunPluginLocation::File(PathBuf::from("/path/to/fake/plugin")),
+                configuration: Default::default(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }))),
+        ..Default::default()
+    };
+    initial_layout.children_split_direction = SplitDirection::Vertical;
+    initial_layout.children = vec![TiledPaneLayout::default(), existing_plugin_pane];
+    let screen_thread = mock_screen.run_with_alias(Some(initial_layout), vec![]);
+    let received_plugin_instructions = Arc::new(Mutex::new(vec![]));
+    let plugin_thread = log_actions_in_thread!(
+        received_plugin_instructions,
+        PluginInstruction::Exit,
+        plugin_receiver
+    );
+    let received_server_instructions = Arc::new(Mutex::new(vec![]));
+    let server_receiver = mock_screen.server_receiver.take().unwrap();
+    let server_thread = log_actions_in_thread!(
+        received_server_instructions,
+        ServerInstruction::KillSession,
+        server_receiver
+    );
+    let cli_action = CliAction::LaunchOrFocusPlugin {
+        floating: true,
+        in_place: false,
+        move_to_focused_tab: true,
+        url: "fixture_plugin_for_tests".to_owned(),
+        configuration: Default::default(),
+        skip_plugin_cache: false,
+    };
+    send_cli_action_to_server(&session_metadata, cli_action, client_id);
+    std::thread::sleep(std::time::Duration::from_millis(100)); // give time for actions to be
+    mock_screen.teardown(vec![plugin_thread, server_thread, screen_thread]);
+
+    let plugin_load_instruction_sent = received_plugin_instructions
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|instruction| match instruction {
+            PluginInstruction::Load(..) => true,
+            _ => false,
+        })
+        .is_some();
+    assert!(
+        !plugin_load_instruction_sent,
+        "Plugin Load instruction should not be sent for an already loaded plugin"
+    );
+    let snapshots = take_snapshots_and_cursor_coordinates_from_render_events(
+        received_server_instructions.lock().unwrap().iter(),
+        size,
+    );
+    let snapshot_count = snapshots.len();
+    assert_eq!(
+        snapshot_count, 2,
+        "Another render was sent for focusing the already loaded plugin"
+    );
+    for (cursor_coordinates, _snapshot) in snapshots.iter().skip(1) {
+        assert!(
+            cursor_coordinates.is_none(),
+            "Cursor moved to existing plugin in final snapshot indicating focus changed"
+        );
+    }
+}
+
+#[test]
+pub fn screen_can_suppress_pane() {
+    let size = Size { cols: 80, rows: 20 };
+    let mut initial_layout = TiledPaneLayout::default();
+    initial_layout.children_split_direction = SplitDirection::Vertical;
+    initial_layout.children = vec![TiledPaneLayout::default(), TiledPaneLayout::default()];
+    let mut mock_screen = MockScreen::new(size);
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
+    let received_server_instructions = Arc::new(Mutex::new(vec![]));
+    let server_receiver = mock_screen.server_receiver.take().unwrap();
+    let server_thread = log_actions_in_thread!(
+        received_server_instructions,
+        ServerInstruction::KillSession,
+        server_receiver
+    );
+    let _ = mock_screen
+        .to_screen
+        .send(ScreenInstruction::SuppressPane(PaneId::Terminal(1), 1));
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    mock_screen.teardown(vec![server_thread, screen_thread]);
+
+    let snapshots = take_snapshots_and_cursor_coordinates_from_render_events(
+        received_server_instructions.lock().unwrap().iter(),
+        size,
+    );
+    let snapshot_count = snapshots.len();
+    for (_cursor_coordinates, snapshot) in snapshots {
+        assert_snapshot!(format!("{}", snapshot));
+    }
+    assert_snapshot!(format!("{}", snapshot_count));
+}
+
+#[test]
+pub fn screen_can_break_pane_to_a_new_tab() {
+    let size = Size { cols: 80, rows: 20 };
+    let mut initial_layout = TiledPaneLayout::default();
+    let mut pane_to_break_free = TiledPaneLayout::default();
+    pane_to_break_free.name = Some("pane_to_break_free".to_owned());
+    let mut pane_to_stay = TiledPaneLayout::default();
+    pane_to_stay.name = Some("pane_to_stay".to_owned());
+    initial_layout.children_split_direction = SplitDirection::Vertical;
+    initial_layout.children = vec![pane_to_break_free, pane_to_stay];
+    let mut mock_screen = MockScreen::new(size);
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
+    let received_server_instructions = Arc::new(Mutex::new(vec![]));
+    let server_receiver = mock_screen.server_receiver.take().unwrap();
+    let server_thread = log_actions_in_thread!(
+        received_server_instructions,
+        ServerInstruction::KillSession,
+        server_receiver
+    );
+
+    let _ = mock_screen.to_screen.send(ScreenInstruction::BreakPane(
+        Box::new(Layout::default()),
+        Default::default(),
+        1,
+    ));
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    // we send ApplyLayout, because in prod this is eventually received after the message traverses
+    // through the plugin and pty threads (to open extra stuff we need in the layout, eg. the
+    // default plugins)
+    let _ = mock_screen.to_screen.send(ScreenInstruction::ApplyLayout(
+        TiledPaneLayout::default(),
+        vec![], // floating_panes_layout
+        Default::default(),
+        vec![], // floating panes ids
+        Default::default(),
+        1,
+        true,
+        1,
+    ));
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    // move back to make sure the other pane is in the previous tab
+    let _ = mock_screen
+        .to_screen
+        .send(ScreenInstruction::MoveFocusLeftOrPreviousTab(1));
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    // move forward to make sure the broken pane is in the previous tab
+    let _ = mock_screen
+        .to_screen
+        .send(ScreenInstruction::MoveFocusRightOrNextTab(1));
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    mock_screen.teardown(vec![server_thread, screen_thread]);
+
+    let snapshots = take_snapshots_and_cursor_coordinates_from_render_events(
+        received_server_instructions.lock().unwrap().iter(),
+        size,
+    );
+    let snapshot_count = snapshots.len();
+    for (_cursor_coordinates, snapshot) in snapshots {
+        assert_snapshot!(format!("{}", snapshot));
+    }
+    assert_snapshot!(format!("{}", snapshot_count));
+}
+
+#[test]
+pub fn screen_cannot_break_last_selectable_pane_to_a_new_tab() {
+    let size = Size { cols: 80, rows: 20 };
+    let initial_layout = TiledPaneLayout::default();
+    let mut mock_screen = MockScreen::new(size);
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
+    let received_server_instructions = Arc::new(Mutex::new(vec![]));
+    let server_receiver = mock_screen.server_receiver.take().unwrap();
+    let server_thread = log_actions_in_thread!(
+        received_server_instructions,
+        ServerInstruction::KillSession,
+        server_receiver
+    );
+
+    let _ = mock_screen.to_screen.send(ScreenInstruction::BreakPane(
+        Box::new(Layout::default()),
+        Default::default(),
+        1,
+    ));
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    mock_screen.teardown(vec![server_thread, screen_thread]);
+
+    let snapshots = take_snapshots_and_cursor_coordinates_from_render_events(
+        received_server_instructions.lock().unwrap().iter(),
+        size,
+    );
+    let snapshot_count = snapshots.len();
+    for (_cursor_coordinates, snapshot) in snapshots {
+        assert_snapshot!(format!("{}", snapshot));
+    }
+    assert_snapshot!(format!("{}", snapshot_count));
+}
+
+#[test]
+pub fn screen_can_break_floating_pane_to_a_new_tab() {
+    let size = Size { cols: 80, rows: 20 };
+    let mut initial_layout = TiledPaneLayout::default();
+    let mut pane_to_break_free = TiledPaneLayout::default();
+    pane_to_break_free.name = Some("tiled_pane".to_owned());
+    let mut floating_pane = FloatingPaneLayout::default();
+    floating_pane.name = Some("floating_pane_to_eject".to_owned());
+    let mut floating_panes_layout = vec![floating_pane];
+    initial_layout.children_split_direction = SplitDirection::Vertical;
+    initial_layout.children = vec![pane_to_break_free];
+    let mut mock_screen = MockScreen::new(size);
+    let screen_thread = mock_screen.run(Some(initial_layout), floating_panes_layout.clone());
+    let received_server_instructions = Arc::new(Mutex::new(vec![]));
+    let server_receiver = mock_screen.server_receiver.take().unwrap();
+    let server_thread = log_actions_in_thread!(
+        received_server_instructions,
+        ServerInstruction::KillSession,
+        server_receiver
+    );
+
+    let _ = mock_screen.to_screen.send(ScreenInstruction::BreakPane(
+        Box::new(Layout::default()),
+        Default::default(),
+        1,
+    ));
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    // we send ApplyLayout, because in prod this is eventually received after the message traverses
+    // through the plugin and pty threads (to open extra stuff we need in the layout, eg. the
+    // default plugins)
+    floating_panes_layout.get_mut(0).unwrap().already_running = true;
+    let _ = mock_screen.to_screen.send(ScreenInstruction::ApplyLayout(
+        TiledPaneLayout::default(),
+        floating_panes_layout,
+        vec![(1, None)], // tiled pane ids - send these because one needs to be created under the
+        // ejected floating pane, lest the tab be closed as having no tiled panes
+        // (this happens in prod in the pty thread)
+        vec![], // floating panes ids
+        Default::default(),
+        1,
+        true,
+        1,
+    ));
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    // move back to make sure the other pane is in the previous tab
+    let _ = mock_screen
+        .to_screen
+        .send(ScreenInstruction::MoveFocusLeftOrPreviousTab(1));
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    // move forward to make sure the broken pane is in the previous tab
+    let _ = mock_screen
+        .to_screen
+        .send(ScreenInstruction::MoveFocusRightOrNextTab(1));
+    std::thread::sleep(std::time::Duration::from_millis(200));
+
+    mock_screen.teardown(vec![server_thread, screen_thread]);
+
+    let snapshots = take_snapshots_and_cursor_coordinates_from_render_events(
+        received_server_instructions.lock().unwrap().iter(),
+        size,
+    );
+    let snapshot_count = snapshots.len();
+    for (_cursor_coordinates, snapshot) in snapshots {
+        assert_snapshot!(format!("{}", snapshot));
+    }
+    assert_snapshot!(format!("{}", snapshot_count));
+}
+
+#[test]
+pub fn screen_can_break_plugin_pane_to_a_new_tab() {
+    let size = Size { cols: 80, rows: 20 };
+    let mut initial_layout = TiledPaneLayout::default();
+    let mut pane_to_break_free = TiledPaneLayout::default();
+    pane_to_break_free.name = Some("plugin_pane_to_break_free".to_owned());
+    pane_to_break_free.run = Some(Run::Plugin(RunPluginOrAlias::RunPlugin(RunPlugin {
+        _allow_exec_host_cmd: false,
+        location: RunPluginLocation::File(PathBuf::from("/path/to/fake/plugin")),
+        configuration: Default::default(),
+        ..Default::default()
+    })));
+    let mut pane_to_stay = TiledPaneLayout::default();
+    pane_to_stay.name = Some("pane_to_stay".to_owned());
+    initial_layout.children_split_direction = SplitDirection::Vertical;
+    initial_layout.children = vec![pane_to_break_free, pane_to_stay];
+    let mut mock_screen = MockScreen::new(size);
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
+    let received_server_instructions = Arc::new(Mutex::new(vec![]));
+    let server_receiver = mock_screen.server_receiver.take().unwrap();
+    let server_thread = log_actions_in_thread!(
+        received_server_instructions,
+        ServerInstruction::KillSession,
+        server_receiver
+    );
+
+    let _ = mock_screen.to_screen.send(ScreenInstruction::BreakPane(
+        Box::new(Layout::default()),
+        Default::default(),
+        1,
+    ));
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    // we send ApplyLayout, because in prod this is eventually received after the message traverses
+    // through the plugin and pty threads (to open extra stuff we need in the layout, eg. the
+    // default plugins)
+    let _ = mock_screen.to_screen.send(ScreenInstruction::ApplyLayout(
+        TiledPaneLayout::default(),
+        vec![], // floating_panes_layout
+        Default::default(),
+        vec![], // floating panes ids
+        Default::default(),
+        1,
+        true,
+        1,
+    ));
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    // move back to make sure the other pane is in the previous tab
+    let _ = mock_screen
+        .to_screen
+        .send(ScreenInstruction::MoveFocusLeftOrPreviousTab(1));
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    // move forward to make sure the broken pane is in the previous tab
+    let _ = mock_screen
+        .to_screen
+        .send(ScreenInstruction::MoveFocusRightOrNextTab(1));
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    mock_screen.teardown(vec![server_thread, screen_thread]);
+
+    let snapshots = take_snapshots_and_cursor_coordinates_from_render_events(
+        received_server_instructions.lock().unwrap().iter(),
+        size,
+    );
+    let snapshot_count = snapshots.len();
+    for (_cursor_coordinates, snapshot) in snapshots {
+        assert_snapshot!(format!("{}", snapshot));
+    }
+    assert_snapshot!(format!("{}", snapshot_count));
+}
+
+#[test]
+pub fn screen_can_break_floating_plugin_pane_to_a_new_tab() {
+    let size = Size { cols: 80, rows: 20 };
+    let mut initial_layout = TiledPaneLayout::default();
+    let mut pane_to_break_free = TiledPaneLayout::default();
+    pane_to_break_free.name = Some("tiled_pane".to_owned());
+    let mut floating_pane = FloatingPaneLayout::default();
+    floating_pane.name = Some("floating_plugin_pane_to_eject".to_owned());
+    floating_pane.run = Some(Run::Plugin(RunPluginOrAlias::RunPlugin(RunPlugin {
+        _allow_exec_host_cmd: false,
+        location: RunPluginLocation::File(PathBuf::from("/path/to/fake/plugin")),
+        configuration: Default::default(),
+        ..Default::default()
+    })));
+    let mut floating_panes_layout = vec![floating_pane];
+    initial_layout.children_split_direction = SplitDirection::Vertical;
+    initial_layout.children = vec![pane_to_break_free];
+    let mut mock_screen = MockScreen::new(size);
+    let screen_thread = mock_screen.run(Some(initial_layout), floating_panes_layout.clone());
+    let received_server_instructions = Arc::new(Mutex::new(vec![]));
+    let server_receiver = mock_screen.server_receiver.take().unwrap();
+    let server_thread = log_actions_in_thread!(
+        received_server_instructions,
+        ServerInstruction::KillSession,
+        server_receiver
+    );
+
+    let _ = mock_screen.to_screen.send(ScreenInstruction::BreakPane(
+        Box::new(Layout::default()),
+        Default::default(),
+        1,
+    ));
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    // we send ApplyLayout, because in prod this is eventually received after the message traverses
+    // through the plugin and pty threads (to open extra stuff we need in the layout, eg. the
+    // default plugins)
+    floating_panes_layout.get_mut(0).unwrap().already_running = true;
+    let _ = mock_screen.to_screen.send(ScreenInstruction::ApplyLayout(
+        TiledPaneLayout::default(),
+        floating_panes_layout,
+        vec![(1, None)], // tiled pane ids - send these because one needs to be created under the
+        // ejected floating pane, lest the tab be closed as having no tiled panes
+        // (this happens in prod in the pty thread)
+        vec![], // floating panes ids
+        Default::default(),
+        1,
+        true,
+        1,
+    ));
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    // move back to make sure the other pane is in the previous tab
+    let _ = mock_screen
+        .to_screen
+        .send(ScreenInstruction::MoveFocusLeftOrPreviousTab(1));
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    // move forward to make sure the broken pane is in the previous tab
+    let _ = mock_screen
+        .to_screen
+        .send(ScreenInstruction::MoveFocusRightOrNextTab(1));
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    mock_screen.teardown(vec![server_thread, screen_thread]);
+
+    let snapshots = take_snapshots_and_cursor_coordinates_from_render_events(
+        received_server_instructions.lock().unwrap().iter(),
+        size,
+    );
+    let snapshot_count = snapshots.len();
+    for (_cursor_coordinates, snapshot) in snapshots {
+        assert_snapshot!(format!("{}", snapshot));
+    }
+    assert_snapshot!(format!("{}", snapshot_count));
+}
+
+#[test]
+pub fn screen_can_move_pane_to_a_new_tab_right() {
+    let size = Size { cols: 80, rows: 20 };
+    let mut initial_layout = TiledPaneLayout::default();
+    let mut pane_to_break_free = TiledPaneLayout::default();
+    pane_to_break_free.name = Some("pane_to_break_free".to_owned());
+    let mut pane_to_stay = TiledPaneLayout::default();
+    pane_to_stay.name = Some("pane_to_stay".to_owned());
+    initial_layout.children_split_direction = SplitDirection::Vertical;
+    initial_layout.children = vec![pane_to_break_free, pane_to_stay];
+    let mut mock_screen = MockScreen::new(size);
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
+    let received_server_instructions = Arc::new(Mutex::new(vec![]));
+    let server_receiver = mock_screen.server_receiver.take().unwrap();
+    let server_thread = log_actions_in_thread!(
+        received_server_instructions,
+        ServerInstruction::KillSession,
+        server_receiver
+    );
+
+    let _ = mock_screen.to_screen.send(ScreenInstruction::BreakPane(
+        Box::new(Layout::default()),
+        Default::default(),
+        1,
+    ));
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    let _ = mock_screen
+        .to_screen
+        .send(ScreenInstruction::MoveFocusLeftOrPreviousTab(1));
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    let _ = mock_screen
+        .to_screen
+        .send(ScreenInstruction::BreakPaneRight(1));
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    mock_screen.teardown(vec![server_thread, screen_thread]);
+
+    let snapshots = take_snapshots_and_cursor_coordinates_from_render_events(
+        received_server_instructions.lock().unwrap().iter(),
+        size,
+    );
+    let snapshot_count = snapshots.len();
+    for (_cursor_coordinates, snapshot) in snapshots {
+        assert_snapshot!(format!("{}", snapshot));
+    }
+    assert_snapshot!(format!("{}", snapshot_count));
+}
+
+#[test]
+pub fn screen_can_move_pane_to_a_new_tab_left() {
+    let size = Size { cols: 80, rows: 20 };
+    let mut initial_layout = TiledPaneLayout::default();
+    let mut pane_to_break_free = TiledPaneLayout::default();
+    pane_to_break_free.name = Some("pane_to_break_free".to_owned());
+    let mut pane_to_stay = TiledPaneLayout::default();
+    pane_to_stay.name = Some("pane_to_stay".to_owned());
+    initial_layout.children_split_direction = SplitDirection::Vertical;
+    initial_layout.children = vec![pane_to_break_free, pane_to_stay];
+    let mut mock_screen = MockScreen::new(size);
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
+    let received_server_instructions = Arc::new(Mutex::new(vec![]));
+    let server_receiver = mock_screen.server_receiver.take().unwrap();
+    let server_thread = log_actions_in_thread!(
+        received_server_instructions,
+        ServerInstruction::KillSession,
+        server_receiver
+    );
+
+    let _ = mock_screen.to_screen.send(ScreenInstruction::BreakPane(
+        Box::new(Layout::default()),
+        Default::default(),
+        1,
+    ));
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    let _ = mock_screen
+        .to_screen
+        .send(ScreenInstruction::MoveFocusLeftOrPreviousTab(1));
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    let _ = mock_screen
+        .to_screen
+        .send(ScreenInstruction::BreakPaneLeft(1));
+    std::thread::sleep(std::time::Duration::from_millis(100));
+
+    mock_screen.teardown(vec![server_thread, screen_thread]);
+
+    let snapshots = take_snapshots_and_cursor_coordinates_from_render_events(
+        received_server_instructions.lock().unwrap().iter(),
+        size,
+    );
+    let snapshot_count = snapshots.len();
+    for (_cursor_coordinates, snapshot) in snapshots {
+        assert_snapshot!(format!("{}", snapshot));
+    }
+    assert_snapshot!(format!("{}", snapshot_count));
+}
+
+#[test]
+pub fn send_cli_stack_panes_action() {
+    let size = Size { cols: 80, rows: 10 };
+    let client_id = 10; // fake client id should not appear in the screen's state
+    let mut initial_layout = TiledPaneLayout::default();
+    initial_layout.children_split_direction = SplitDirection::Vertical;
+    initial_layout.children = vec![
+        TiledPaneLayout::default(),
+        TiledPaneLayout::default(),
+        TiledPaneLayout::default(),
+        TiledPaneLayout::default(),
+        TiledPaneLayout::default(),
+    ];
+    let mut mock_screen = MockScreen::new(size);
+    let session_metadata = mock_screen.clone_session_metadata();
+    let screen_thread = mock_screen.run(Some(initial_layout), vec![]);
+    let received_server_instructions = Arc::new(Mutex::new(vec![]));
+    let server_receiver = mock_screen.server_receiver.take().unwrap();
+    let server_thread = log_actions_in_thread!(
+        received_server_instructions,
+        ServerInstruction::KillSession,
+        server_receiver
+    );
+    let stack_panes_action = CliAction::StackPanes {
+        pane_ids: vec!["1".to_owned(), "2".to_owned(), "3".to_owned()],
+    };
+    send_cli_action_to_server(&session_metadata, stack_panes_action, client_id);
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    mock_screen.teardown(vec![server_thread, screen_thread]);
+    let snapshots = take_snapshots_and_cursor_coordinates_from_render_events(
+        received_server_instructions.lock().unwrap().iter(),
+        size,
+    );
+    let snapshot_count = snapshots.len();
+    for (_cursor_coordinates, snapshot) in snapshots {
+        assert_snapshot!(format!("{}", snapshot));
+    }
+    assert_snapshot!(format!("{}", snapshot_count));
+}
+
+#[test]
+pub fn send_cli_change_floating_pane_coordinates_action() {
+    let size = Size { cols: 80, rows: 10 };
+    let client_id = 10; // fake client id should not appear in the screen's state
+    let initial_tiled_layout = TiledPaneLayout::default();
+    let initial_floating_panes = vec![FloatingPaneLayout::default()];
+    let mut mock_screen = MockScreen::new(size);
+    let session_metadata = mock_screen.clone_session_metadata();
+    let screen_thread = mock_screen.run(Some(initial_tiled_layout), initial_floating_panes);
+
+    let received_server_instructions = Arc::new(Mutex::new(vec![]));
+    let server_receiver = mock_screen.server_receiver.take().unwrap();
+    let server_thread = log_actions_in_thread!(
+        received_server_instructions,
+        ServerInstruction::KillSession,
+        server_receiver
+    );
+    let change_floating_pane_coordinates_action = CliAction::ChangeFloatingPaneCoordinates {
+        pane_id: "0".to_owned(),
+        x: Some("0".to_owned()),
+        y: Some("0".to_owned()),
+        width: Some("10".to_owned()),
+        height: Some("10".to_owned()),
+        pinned: None,
+    };
+    send_cli_action_to_server(
+        &session_metadata,
+        change_floating_pane_coordinates_action,
+        client_id,
+    );
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    mock_screen.teardown(vec![server_thread, screen_thread]);
+    let snapshots = take_snapshots_and_cursor_coordinates_from_render_events(
+        received_server_instructions.lock().unwrap().iter(),
+        size,
+    );
+    let snapshot_count = snapshots.len();
+    for (_cursor_coordinates, snapshot) in snapshots {
+        assert_snapshot!(format!("{}", snapshot));
+    }
+    assert_snapshot!(format!("{}", snapshot_count));
 }

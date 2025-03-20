@@ -1,5 +1,6 @@
 ---
 source: zellij-utils/src/setup.rs
+assertion_line: 756
 expression: "format!(\"{:#?}\", layout)"
 ---
 Layout {
@@ -22,14 +23,18 @@ Layout {
                         ),
                         run: Some(
                             Plugin(
-                                RunPlugin {
-                                    _allow_exec_host_cmd: false,
-                                    location: Zellij(
-                                        PluginTag(
-                                            "tab-bar",
+                                Alias(
+                                    PluginAlias {
+                                        name: "tab-bar",
+                                        configuration: Some(
+                                            PluginUserConfiguration(
+                                                {},
+                                            ),
                                         ),
-                                    ),
-                                },
+                                        initial_cwd: None,
+                                        run_plugin: None,
+                                    },
+                                ),
                             ),
                         ),
                         borderless: true,
@@ -38,6 +43,9 @@ Layout {
                         children_are_stacked: false,
                         is_expanded_in_stack: false,
                         exclude_from_sync: None,
+                        run_instructions_to_ignore: [],
+                        hide_floating_panes: false,
+                        pane_initial_contents: None,
                     },
                     TiledPaneLayout {
                         children_split_direction: Horizontal,
@@ -51,6 +59,9 @@ Layout {
                         children_are_stacked: false,
                         is_expanded_in_stack: false,
                         exclude_from_sync: None,
+                        run_instructions_to_ignore: [],
+                        hide_floating_panes: false,
+                        pane_initial_contents: None,
                     },
                     TiledPaneLayout {
                         children_split_direction: Horizontal,
@@ -58,19 +69,23 @@ Layout {
                         children: [],
                         split_size: Some(
                             Fixed(
-                                2,
+                                1,
                             ),
                         ),
                         run: Some(
                             Plugin(
-                                RunPlugin {
-                                    _allow_exec_host_cmd: false,
-                                    location: Zellij(
-                                        PluginTag(
-                                            "status-bar",
+                                Alias(
+                                    PluginAlias {
+                                        name: "status-bar",
+                                        configuration: Some(
+                                            PluginUserConfiguration(
+                                                {},
+                                            ),
                                         ),
-                                    ),
-                                },
+                                        initial_cwd: None,
+                                        run_plugin: None,
+                                    },
+                                ),
                             ),
                         ),
                         borderless: true,
@@ -79,6 +94,9 @@ Layout {
                         children_are_stacked: false,
                         is_expanded_in_stack: false,
                         exclude_from_sync: None,
+                        run_instructions_to_ignore: [],
+                        hide_floating_panes: false,
+                        pane_initial_contents: None,
                     },
                 ],
                 split_size: None,
@@ -89,6 +107,9 @@ Layout {
                 children_are_stacked: false,
                 is_expanded_in_stack: false,
                 exclude_from_sync: None,
+                run_instructions_to_ignore: [],
+                hide_floating_panes: false,
+                pane_initial_contents: None,
             },
             [],
         ),
@@ -114,14 +135,18 @@ Layout {
                             ),
                             run: Some(
                                 Plugin(
-                                    RunPlugin {
-                                        _allow_exec_host_cmd: false,
-                                        location: Zellij(
-                                            PluginTag(
-                                                "tab-bar",
+                                    Alias(
+                                        PluginAlias {
+                                            name: "tab-bar",
+                                            configuration: Some(
+                                                PluginUserConfiguration(
+                                                    {},
+                                                ),
                                             ),
-                                        ),
-                                    },
+                                            initial_cwd: None,
+                                            run_plugin: None,
+                                        },
+                                    ),
                                 ),
                             ),
                             borderless: true,
@@ -130,6 +155,9 @@ Layout {
                             children_are_stacked: false,
                             is_expanded_in_stack: false,
                             exclude_from_sync: None,
+                            run_instructions_to_ignore: [],
+                            hide_floating_panes: false,
+                            pane_initial_contents: None,
                         },
                         TiledPaneLayout {
                             children_split_direction: Horizontal,
@@ -151,6 +179,9 @@ Layout {
                                             children_are_stacked: false,
                                             is_expanded_in_stack: false,
                                             exclude_from_sync: None,
+                                            run_instructions_to_ignore: [],
+                                            hide_floating_panes: false,
+                                            pane_initial_contents: None,
                                         },
                                         TiledPaneLayout {
                                             children_split_direction: Horizontal,
@@ -166,6 +197,9 @@ Layout {
                                             children_are_stacked: false,
                                             is_expanded_in_stack: false,
                                             exclude_from_sync: None,
+                                            run_instructions_to_ignore: [],
+                                            hide_floating_panes: false,
+                                            pane_initial_contents: None,
                                         },
                                     ],
                                     split_size: None,
@@ -176,6 +210,9 @@ Layout {
                                     children_are_stacked: false,
                                     is_expanded_in_stack: false,
                                     exclude_from_sync: None,
+                                    run_instructions_to_ignore: [],
+                                    hide_floating_panes: false,
+                                    pane_initial_contents: None,
                                 },
                             ],
                             split_size: None,
@@ -186,6 +223,9 @@ Layout {
                             children_are_stacked: false,
                             is_expanded_in_stack: false,
                             exclude_from_sync: None,
+                            run_instructions_to_ignore: [],
+                            hide_floating_panes: false,
+                            pane_initial_contents: None,
                         },
                         TiledPaneLayout {
                             children_split_direction: Horizontal,
@@ -193,19 +233,23 @@ Layout {
                             children: [],
                             split_size: Some(
                                 Fixed(
-                                    2,
+                                    1,
                                 ),
                             ),
                             run: Some(
                                 Plugin(
-                                    RunPlugin {
-                                        _allow_exec_host_cmd: false,
-                                        location: Zellij(
-                                            PluginTag(
-                                                "status-bar",
+                                    Alias(
+                                        PluginAlias {
+                                            name: "status-bar",
+                                            configuration: Some(
+                                                PluginUserConfiguration(
+                                                    {},
+                                                ),
                                             ),
-                                        ),
-                                    },
+                                            initial_cwd: None,
+                                            run_plugin: None,
+                                        },
+                                    ),
                                 ),
                             ),
                             borderless: true,
@@ -214,6 +258,9 @@ Layout {
                             children_are_stacked: false,
                             is_expanded_in_stack: false,
                             exclude_from_sync: None,
+                            run_instructions_to_ignore: [],
+                            hide_floating_panes: false,
+                            pane_initial_contents: None,
                         },
                     ],
                     split_size: None,
@@ -224,6 +271,9 @@ Layout {
                     children_are_stacked: false,
                     is_expanded_in_stack: false,
                     exclude_from_sync: None,
+                    run_instructions_to_ignore: [],
+                    hide_floating_panes: false,
+                    pane_initial_contents: None,
                 },
                 MaxPanes(
                     8,
@@ -242,14 +292,18 @@ Layout {
                             ),
                             run: Some(
                                 Plugin(
-                                    RunPlugin {
-                                        _allow_exec_host_cmd: false,
-                                        location: Zellij(
-                                            PluginTag(
-                                                "tab-bar",
+                                    Alias(
+                                        PluginAlias {
+                                            name: "tab-bar",
+                                            configuration: Some(
+                                                PluginUserConfiguration(
+                                                    {},
+                                                ),
                                             ),
-                                        ),
-                                    },
+                                            initial_cwd: None,
+                                            run_plugin: None,
+                                        },
+                                    ),
                                 ),
                             ),
                             borderless: true,
@@ -258,6 +312,9 @@ Layout {
                             children_are_stacked: false,
                             is_expanded_in_stack: false,
                             exclude_from_sync: None,
+                            run_instructions_to_ignore: [],
+                            hide_floating_panes: false,
+                            pane_initial_contents: None,
                         },
                         TiledPaneLayout {
                             children_split_direction: Horizontal,
@@ -281,6 +338,9 @@ Layout {
                                             children_are_stacked: false,
                                             is_expanded_in_stack: false,
                                             exclude_from_sync: None,
+                                            run_instructions_to_ignore: [],
+                                            hide_floating_panes: false,
+                                            pane_initial_contents: None,
                                         },
                                         TiledPaneLayout {
                                             children_split_direction: Horizontal,
@@ -298,6 +358,9 @@ Layout {
                                                     children_are_stacked: false,
                                                     is_expanded_in_stack: false,
                                                     exclude_from_sync: None,
+                                                    run_instructions_to_ignore: [],
+                                                    hide_floating_panes: false,
+                                                    pane_initial_contents: None,
                                                 },
                                                 TiledPaneLayout {
                                                     children_split_direction: Horizontal,
@@ -311,6 +374,9 @@ Layout {
                                                     children_are_stacked: false,
                                                     is_expanded_in_stack: false,
                                                     exclude_from_sync: None,
+                                                    run_instructions_to_ignore: [],
+                                                    hide_floating_panes: false,
+                                                    pane_initial_contents: None,
                                                 },
                                                 TiledPaneLayout {
                                                     children_split_direction: Horizontal,
@@ -324,6 +390,9 @@ Layout {
                                                     children_are_stacked: false,
                                                     is_expanded_in_stack: false,
                                                     exclude_from_sync: None,
+                                                    run_instructions_to_ignore: [],
+                                                    hide_floating_panes: false,
+                                                    pane_initial_contents: None,
                                                 },
                                                 TiledPaneLayout {
                                                     children_split_direction: Horizontal,
@@ -337,6 +406,9 @@ Layout {
                                                     children_are_stacked: false,
                                                     is_expanded_in_stack: false,
                                                     exclude_from_sync: None,
+                                                    run_instructions_to_ignore: [],
+                                                    hide_floating_panes: false,
+                                                    pane_initial_contents: None,
                                                 },
                                             ],
                                             split_size: None,
@@ -347,6 +419,9 @@ Layout {
                                             children_are_stacked: false,
                                             is_expanded_in_stack: false,
                                             exclude_from_sync: None,
+                                            run_instructions_to_ignore: [],
+                                            hide_floating_panes: false,
+                                            pane_initial_contents: None,
                                         },
                                     ],
                                     split_size: None,
@@ -357,6 +432,9 @@ Layout {
                                     children_are_stacked: false,
                                     is_expanded_in_stack: false,
                                     exclude_from_sync: None,
+                                    run_instructions_to_ignore: [],
+                                    hide_floating_panes: false,
+                                    pane_initial_contents: None,
                                 },
                             ],
                             split_size: None,
@@ -367,6 +445,9 @@ Layout {
                             children_are_stacked: false,
                             is_expanded_in_stack: false,
                             exclude_from_sync: None,
+                            run_instructions_to_ignore: [],
+                            hide_floating_panes: false,
+                            pane_initial_contents: None,
                         },
                         TiledPaneLayout {
                             children_split_direction: Horizontal,
@@ -374,19 +455,23 @@ Layout {
                             children: [],
                             split_size: Some(
                                 Fixed(
-                                    2,
+                                    1,
                                 ),
                             ),
                             run: Some(
                                 Plugin(
-                                    RunPlugin {
-                                        _allow_exec_host_cmd: false,
-                                        location: Zellij(
-                                            PluginTag(
-                                                "status-bar",
+                                    Alias(
+                                        PluginAlias {
+                                            name: "status-bar",
+                                            configuration: Some(
+                                                PluginUserConfiguration(
+                                                    {},
+                                                ),
                                             ),
-                                        ),
-                                    },
+                                            initial_cwd: None,
+                                            run_plugin: None,
+                                        },
+                                    ),
                                 ),
                             ),
                             borderless: true,
@@ -395,6 +480,9 @@ Layout {
                             children_are_stacked: false,
                             is_expanded_in_stack: false,
                             exclude_from_sync: None,
+                            run_instructions_to_ignore: [],
+                            hide_floating_panes: false,
+                            pane_initial_contents: None,
                         },
                     ],
                     split_size: None,
@@ -405,6 +493,9 @@ Layout {
                     children_are_stacked: false,
                     is_expanded_in_stack: false,
                     exclude_from_sync: None,
+                    run_instructions_to_ignore: [],
+                    hide_floating_panes: false,
+                    pane_initial_contents: None,
                 },
                 MaxPanes(
                     12,
@@ -423,14 +514,18 @@ Layout {
                             ),
                             run: Some(
                                 Plugin(
-                                    RunPlugin {
-                                        _allow_exec_host_cmd: false,
-                                        location: Zellij(
-                                            PluginTag(
-                                                "tab-bar",
+                                    Alias(
+                                        PluginAlias {
+                                            name: "tab-bar",
+                                            configuration: Some(
+                                                PluginUserConfiguration(
+                                                    {},
+                                                ),
                                             ),
-                                        ),
-                                    },
+                                            initial_cwd: None,
+                                            run_plugin: None,
+                                        },
+                                    ),
                                 ),
                             ),
                             borderless: true,
@@ -439,6 +534,9 @@ Layout {
                             children_are_stacked: false,
                             is_expanded_in_stack: false,
                             exclude_from_sync: None,
+                            run_instructions_to_ignore: [],
+                            hide_floating_panes: false,
+                            pane_initial_contents: None,
                         },
                         TiledPaneLayout {
                             children_split_direction: Horizontal,
@@ -462,6 +560,9 @@ Layout {
                                             children_are_stacked: false,
                                             is_expanded_in_stack: false,
                                             exclude_from_sync: None,
+                                            run_instructions_to_ignore: [],
+                                            hide_floating_panes: false,
+                                            pane_initial_contents: None,
                                         },
                                         TiledPaneLayout {
                                             children_split_direction: Horizontal,
@@ -479,6 +580,9 @@ Layout {
                                                     children_are_stacked: false,
                                                     is_expanded_in_stack: false,
                                                     exclude_from_sync: None,
+                                                    run_instructions_to_ignore: [],
+                                                    hide_floating_panes: false,
+                                                    pane_initial_contents: None,
                                                 },
                                                 TiledPaneLayout {
                                                     children_split_direction: Horizontal,
@@ -492,6 +596,9 @@ Layout {
                                                     children_are_stacked: false,
                                                     is_expanded_in_stack: false,
                                                     exclude_from_sync: None,
+                                                    run_instructions_to_ignore: [],
+                                                    hide_floating_panes: false,
+                                                    pane_initial_contents: None,
                                                 },
                                                 TiledPaneLayout {
                                                     children_split_direction: Horizontal,
@@ -505,6 +612,9 @@ Layout {
                                                     children_are_stacked: false,
                                                     is_expanded_in_stack: false,
                                                     exclude_from_sync: None,
+                                                    run_instructions_to_ignore: [],
+                                                    hide_floating_panes: false,
+                                                    pane_initial_contents: None,
                                                 },
                                                 TiledPaneLayout {
                                                     children_split_direction: Horizontal,
@@ -518,6 +628,9 @@ Layout {
                                                     children_are_stacked: false,
                                                     is_expanded_in_stack: false,
                                                     exclude_from_sync: None,
+                                                    run_instructions_to_ignore: [],
+                                                    hide_floating_panes: false,
+                                                    pane_initial_contents: None,
                                                 },
                                             ],
                                             split_size: None,
@@ -528,6 +641,9 @@ Layout {
                                             children_are_stacked: false,
                                             is_expanded_in_stack: false,
                                             exclude_from_sync: None,
+                                            run_instructions_to_ignore: [],
+                                            hide_floating_panes: false,
+                                            pane_initial_contents: None,
                                         },
                                         TiledPaneLayout {
                                             children_split_direction: Horizontal,
@@ -545,6 +661,9 @@ Layout {
                                                     children_are_stacked: false,
                                                     is_expanded_in_stack: false,
                                                     exclude_from_sync: None,
+                                                    run_instructions_to_ignore: [],
+                                                    hide_floating_panes: false,
+                                                    pane_initial_contents: None,
                                                 },
                                                 TiledPaneLayout {
                                                     children_split_direction: Horizontal,
@@ -558,6 +677,9 @@ Layout {
                                                     children_are_stacked: false,
                                                     is_expanded_in_stack: false,
                                                     exclude_from_sync: None,
+                                                    run_instructions_to_ignore: [],
+                                                    hide_floating_panes: false,
+                                                    pane_initial_contents: None,
                                                 },
                                                 TiledPaneLayout {
                                                     children_split_direction: Horizontal,
@@ -571,6 +693,9 @@ Layout {
                                                     children_are_stacked: false,
                                                     is_expanded_in_stack: false,
                                                     exclude_from_sync: None,
+                                                    run_instructions_to_ignore: [],
+                                                    hide_floating_panes: false,
+                                                    pane_initial_contents: None,
                                                 },
                                                 TiledPaneLayout {
                                                     children_split_direction: Horizontal,
@@ -584,6 +709,9 @@ Layout {
                                                     children_are_stacked: false,
                                                     is_expanded_in_stack: false,
                                                     exclude_from_sync: None,
+                                                    run_instructions_to_ignore: [],
+                                                    hide_floating_panes: false,
+                                                    pane_initial_contents: None,
                                                 },
                                             ],
                                             split_size: None,
@@ -594,6 +722,9 @@ Layout {
                                             children_are_stacked: false,
                                             is_expanded_in_stack: false,
                                             exclude_from_sync: None,
+                                            run_instructions_to_ignore: [],
+                                            hide_floating_panes: false,
+                                            pane_initial_contents: None,
                                         },
                                     ],
                                     split_size: None,
@@ -604,6 +735,9 @@ Layout {
                                     children_are_stacked: false,
                                     is_expanded_in_stack: false,
                                     exclude_from_sync: None,
+                                    run_instructions_to_ignore: [],
+                                    hide_floating_panes: false,
+                                    pane_initial_contents: None,
                                 },
                             ],
                             split_size: None,
@@ -614,6 +748,9 @@ Layout {
                             children_are_stacked: false,
                             is_expanded_in_stack: false,
                             exclude_from_sync: None,
+                            run_instructions_to_ignore: [],
+                            hide_floating_panes: false,
+                            pane_initial_contents: None,
                         },
                         TiledPaneLayout {
                             children_split_direction: Horizontal,
@@ -621,19 +758,23 @@ Layout {
                             children: [],
                             split_size: Some(
                                 Fixed(
-                                    2,
+                                    1,
                                 ),
                             ),
                             run: Some(
                                 Plugin(
-                                    RunPlugin {
-                                        _allow_exec_host_cmd: false,
-                                        location: Zellij(
-                                            PluginTag(
-                                                "status-bar",
+                                    Alias(
+                                        PluginAlias {
+                                            name: "status-bar",
+                                            configuration: Some(
+                                                PluginUserConfiguration(
+                                                    {},
+                                                ),
                                             ),
-                                        ),
-                                    },
+                                            initial_cwd: None,
+                                            run_plugin: None,
+                                        },
+                                    ),
                                 ),
                             ),
                             borderless: true,
@@ -642,6 +783,9 @@ Layout {
                             children_are_stacked: false,
                             is_expanded_in_stack: false,
                             exclude_from_sync: None,
+                            run_instructions_to_ignore: [],
+                            hide_floating_panes: false,
+                            pane_initial_contents: None,
                         },
                     ],
                     split_size: None,
@@ -652,6 +796,9 @@ Layout {
                     children_are_stacked: false,
                     is_expanded_in_stack: false,
                     exclude_from_sync: None,
+                    run_instructions_to_ignore: [],
+                    hide_floating_panes: false,
+                    pane_initial_contents: None,
                 },
             },
             Some(
@@ -661,7 +808,7 @@ Layout {
         (
             {
                 MaxPanes(
-                    5,
+                    4,
                 ): TiledPaneLayout {
                     children_split_direction: Horizontal,
                     name: None,
@@ -677,14 +824,18 @@ Layout {
                             ),
                             run: Some(
                                 Plugin(
-                                    RunPlugin {
-                                        _allow_exec_host_cmd: false,
-                                        location: Zellij(
-                                            PluginTag(
-                                                "tab-bar",
+                                    Alias(
+                                        PluginAlias {
+                                            name: "tab-bar",
+                                            configuration: Some(
+                                                PluginUserConfiguration(
+                                                    {},
+                                                ),
                                             ),
-                                        ),
-                                    },
+                                            initial_cwd: None,
+                                            run_plugin: None,
+                                        },
+                                    ),
                                 ),
                             ),
                             borderless: true,
@@ -693,6 +844,9 @@ Layout {
                             children_are_stacked: false,
                             is_expanded_in_stack: false,
                             exclude_from_sync: None,
+                            run_instructions_to_ignore: [],
+                            hide_floating_panes: false,
+                            pane_initial_contents: None,
                         },
                         TiledPaneLayout {
                             children_split_direction: Horizontal,
@@ -710,6 +864,9 @@ Layout {
                                     children_are_stacked: false,
                                     is_expanded_in_stack: false,
                                     exclude_from_sync: None,
+                                    run_instructions_to_ignore: [],
+                                    hide_floating_panes: false,
+                                    pane_initial_contents: None,
                                 },
                                 TiledPaneLayout {
                                     children_split_direction: Horizontal,
@@ -723,6 +880,9 @@ Layout {
                                     children_are_stacked: false,
                                     is_expanded_in_stack: false,
                                     exclude_from_sync: None,
+                                    run_instructions_to_ignore: [],
+                                    hide_floating_panes: false,
+                                    pane_initial_contents: None,
                                 },
                             ],
                             split_size: None,
@@ -733,6 +893,9 @@ Layout {
                             children_are_stacked: false,
                             is_expanded_in_stack: false,
                             exclude_from_sync: None,
+                            run_instructions_to_ignore: [],
+                            hide_floating_panes: false,
+                            pane_initial_contents: None,
                         },
                         TiledPaneLayout {
                             children_split_direction: Horizontal,
@@ -740,19 +903,23 @@ Layout {
                             children: [],
                             split_size: Some(
                                 Fixed(
-                                    2,
+                                    1,
                                 ),
                             ),
                             run: Some(
                                 Plugin(
-                                    RunPlugin {
-                                        _allow_exec_host_cmd: false,
-                                        location: Zellij(
-                                            PluginTag(
-                                                "status-bar",
+                                    Alias(
+                                        PluginAlias {
+                                            name: "status-bar",
+                                            configuration: Some(
+                                                PluginUserConfiguration(
+                                                    {},
+                                                ),
                                             ),
-                                        ),
-                                    },
+                                            initial_cwd: None,
+                                            run_plugin: None,
+                                        },
+                                    ),
                                 ),
                             ),
                             borderless: true,
@@ -761,6 +928,9 @@ Layout {
                             children_are_stacked: false,
                             is_expanded_in_stack: false,
                             exclude_from_sync: None,
+                            run_instructions_to_ignore: [],
+                            hide_floating_panes: false,
+                            pane_initial_contents: None,
                         },
                     ],
                     split_size: None,
@@ -771,6 +941,9 @@ Layout {
                     children_are_stacked: false,
                     is_expanded_in_stack: false,
                     exclude_from_sync: None,
+                    run_instructions_to_ignore: [],
+                    hide_floating_panes: false,
+                    pane_initial_contents: None,
                 },
                 MaxPanes(
                     8,
@@ -789,14 +962,18 @@ Layout {
                             ),
                             run: Some(
                                 Plugin(
-                                    RunPlugin {
-                                        _allow_exec_host_cmd: false,
-                                        location: Zellij(
-                                            PluginTag(
-                                                "tab-bar",
+                                    Alias(
+                                        PluginAlias {
+                                            name: "tab-bar",
+                                            configuration: Some(
+                                                PluginUserConfiguration(
+                                                    {},
+                                                ),
                                             ),
-                                        ),
-                                    },
+                                            initial_cwd: None,
+                                            run_plugin: None,
+                                        },
+                                    ),
                                 ),
                             ),
                             borderless: true,
@@ -805,6 +982,9 @@ Layout {
                             children_are_stacked: false,
                             is_expanded_in_stack: false,
                             exclude_from_sync: None,
+                            run_instructions_to_ignore: [],
+                            hide_floating_panes: false,
+                            pane_initial_contents: None,
                         },
                         TiledPaneLayout {
                             children_split_direction: Horizontal,
@@ -828,6 +1008,9 @@ Layout {
                                             children_are_stacked: false,
                                             is_expanded_in_stack: false,
                                             exclude_from_sync: None,
+                                            run_instructions_to_ignore: [],
+                                            hide_floating_panes: false,
+                                            pane_initial_contents: None,
                                         },
                                         TiledPaneLayout {
                                             children_split_direction: Vertical,
@@ -845,6 +1028,9 @@ Layout {
                                                     children_are_stacked: false,
                                                     is_expanded_in_stack: false,
                                                     exclude_from_sync: None,
+                                                    run_instructions_to_ignore: [],
+                                                    hide_floating_panes: false,
+                                                    pane_initial_contents: None,
                                                 },
                                                 TiledPaneLayout {
                                                     children_split_direction: Horizontal,
@@ -858,6 +1044,9 @@ Layout {
                                                     children_are_stacked: false,
                                                     is_expanded_in_stack: false,
                                                     exclude_from_sync: None,
+                                                    run_instructions_to_ignore: [],
+                                                    hide_floating_panes: false,
+                                                    pane_initial_contents: None,
                                                 },
                                                 TiledPaneLayout {
                                                     children_split_direction: Horizontal,
@@ -871,6 +1060,9 @@ Layout {
                                                     children_are_stacked: false,
                                                     is_expanded_in_stack: false,
                                                     exclude_from_sync: None,
+                                                    run_instructions_to_ignore: [],
+                                                    hide_floating_panes: false,
+                                                    pane_initial_contents: None,
                                                 },
                                                 TiledPaneLayout {
                                                     children_split_direction: Horizontal,
@@ -884,6 +1076,9 @@ Layout {
                                                     children_are_stacked: false,
                                                     is_expanded_in_stack: false,
                                                     exclude_from_sync: None,
+                                                    run_instructions_to_ignore: [],
+                                                    hide_floating_panes: false,
+                                                    pane_initial_contents: None,
                                                 },
                                             ],
                                             split_size: None,
@@ -894,6 +1089,9 @@ Layout {
                                             children_are_stacked: false,
                                             is_expanded_in_stack: false,
                                             exclude_from_sync: None,
+                                            run_instructions_to_ignore: [],
+                                            hide_floating_panes: false,
+                                            pane_initial_contents: None,
                                         },
                                     ],
                                     split_size: None,
@@ -904,6 +1102,9 @@ Layout {
                                     children_are_stacked: false,
                                     is_expanded_in_stack: false,
                                     exclude_from_sync: None,
+                                    run_instructions_to_ignore: [],
+                                    hide_floating_panes: false,
+                                    pane_initial_contents: None,
                                 },
                             ],
                             split_size: None,
@@ -914,6 +1115,9 @@ Layout {
                             children_are_stacked: false,
                             is_expanded_in_stack: false,
                             exclude_from_sync: None,
+                            run_instructions_to_ignore: [],
+                            hide_floating_panes: false,
+                            pane_initial_contents: None,
                         },
                         TiledPaneLayout {
                             children_split_direction: Horizontal,
@@ -921,19 +1125,23 @@ Layout {
                             children: [],
                             split_size: Some(
                                 Fixed(
-                                    2,
+                                    1,
                                 ),
                             ),
                             run: Some(
                                 Plugin(
-                                    RunPlugin {
-                                        _allow_exec_host_cmd: false,
-                                        location: Zellij(
-                                            PluginTag(
-                                                "status-bar",
+                                    Alias(
+                                        PluginAlias {
+                                            name: "status-bar",
+                                            configuration: Some(
+                                                PluginUserConfiguration(
+                                                    {},
+                                                ),
                                             ),
-                                        ),
-                                    },
+                                            initial_cwd: None,
+                                            run_plugin: None,
+                                        },
+                                    ),
                                 ),
                             ),
                             borderless: true,
@@ -942,6 +1150,9 @@ Layout {
                             children_are_stacked: false,
                             is_expanded_in_stack: false,
                             exclude_from_sync: None,
+                            run_instructions_to_ignore: [],
+                            hide_floating_panes: false,
+                            pane_initial_contents: None,
                         },
                     ],
                     split_size: None,
@@ -952,6 +1163,9 @@ Layout {
                     children_are_stacked: false,
                     is_expanded_in_stack: false,
                     exclude_from_sync: None,
+                    run_instructions_to_ignore: [],
+                    hide_floating_panes: false,
+                    pane_initial_contents: None,
                 },
                 MaxPanes(
                     12,
@@ -970,14 +1184,18 @@ Layout {
                             ),
                             run: Some(
                                 Plugin(
-                                    RunPlugin {
-                                        _allow_exec_host_cmd: false,
-                                        location: Zellij(
-                                            PluginTag(
-                                                "tab-bar",
+                                    Alias(
+                                        PluginAlias {
+                                            name: "tab-bar",
+                                            configuration: Some(
+                                                PluginUserConfiguration(
+                                                    {},
+                                                ),
                                             ),
-                                        ),
-                                    },
+                                            initial_cwd: None,
+                                            run_plugin: None,
+                                        },
+                                    ),
                                 ),
                             ),
                             borderless: true,
@@ -986,6 +1204,9 @@ Layout {
                             children_are_stacked: false,
                             is_expanded_in_stack: false,
                             exclude_from_sync: None,
+                            run_instructions_to_ignore: [],
+                            hide_floating_panes: false,
+                            pane_initial_contents: None,
                         },
                         TiledPaneLayout {
                             children_split_direction: Horizontal,
@@ -1009,6 +1230,9 @@ Layout {
                                             children_are_stacked: false,
                                             is_expanded_in_stack: false,
                                             exclude_from_sync: None,
+                                            run_instructions_to_ignore: [],
+                                            hide_floating_panes: false,
+                                            pane_initial_contents: None,
                                         },
                                         TiledPaneLayout {
                                             children_split_direction: Vertical,
@@ -1026,6 +1250,9 @@ Layout {
                                                     children_are_stacked: false,
                                                     is_expanded_in_stack: false,
                                                     exclude_from_sync: None,
+                                                    run_instructions_to_ignore: [],
+                                                    hide_floating_panes: false,
+                                                    pane_initial_contents: None,
                                                 },
                                                 TiledPaneLayout {
                                                     children_split_direction: Horizontal,
@@ -1039,6 +1266,9 @@ Layout {
                                                     children_are_stacked: false,
                                                     is_expanded_in_stack: false,
                                                     exclude_from_sync: None,
+                                                    run_instructions_to_ignore: [],
+                                                    hide_floating_panes: false,
+                                                    pane_initial_contents: None,
                                                 },
                                                 TiledPaneLayout {
                                                     children_split_direction: Horizontal,
@@ -1052,6 +1282,9 @@ Layout {
                                                     children_are_stacked: false,
                                                     is_expanded_in_stack: false,
                                                     exclude_from_sync: None,
+                                                    run_instructions_to_ignore: [],
+                                                    hide_floating_panes: false,
+                                                    pane_initial_contents: None,
                                                 },
                                                 TiledPaneLayout {
                                                     children_split_direction: Horizontal,
@@ -1065,6 +1298,9 @@ Layout {
                                                     children_are_stacked: false,
                                                     is_expanded_in_stack: false,
                                                     exclude_from_sync: None,
+                                                    run_instructions_to_ignore: [],
+                                                    hide_floating_panes: false,
+                                                    pane_initial_contents: None,
                                                 },
                                             ],
                                             split_size: None,
@@ -1075,6 +1311,9 @@ Layout {
                                             children_are_stacked: false,
                                             is_expanded_in_stack: false,
                                             exclude_from_sync: None,
+                                            run_instructions_to_ignore: [],
+                                            hide_floating_panes: false,
+                                            pane_initial_contents: None,
                                         },
                                         TiledPaneLayout {
                                             children_split_direction: Vertical,
@@ -1092,6 +1331,9 @@ Layout {
                                                     children_are_stacked: false,
                                                     is_expanded_in_stack: false,
                                                     exclude_from_sync: None,
+                                                    run_instructions_to_ignore: [],
+                                                    hide_floating_panes: false,
+                                                    pane_initial_contents: None,
                                                 },
                                                 TiledPaneLayout {
                                                     children_split_direction: Horizontal,
@@ -1105,6 +1347,9 @@ Layout {
                                                     children_are_stacked: false,
                                                     is_expanded_in_stack: false,
                                                     exclude_from_sync: None,
+                                                    run_instructions_to_ignore: [],
+                                                    hide_floating_panes: false,
+                                                    pane_initial_contents: None,
                                                 },
                                                 TiledPaneLayout {
                                                     children_split_direction: Horizontal,
@@ -1118,6 +1363,9 @@ Layout {
                                                     children_are_stacked: false,
                                                     is_expanded_in_stack: false,
                                                     exclude_from_sync: None,
+                                                    run_instructions_to_ignore: [],
+                                                    hide_floating_panes: false,
+                                                    pane_initial_contents: None,
                                                 },
                                                 TiledPaneLayout {
                                                     children_split_direction: Horizontal,
@@ -1131,6 +1379,9 @@ Layout {
                                                     children_are_stacked: false,
                                                     is_expanded_in_stack: false,
                                                     exclude_from_sync: None,
+                                                    run_instructions_to_ignore: [],
+                                                    hide_floating_panes: false,
+                                                    pane_initial_contents: None,
                                                 },
                                             ],
                                             split_size: None,
@@ -1141,6 +1392,9 @@ Layout {
                                             children_are_stacked: false,
                                             is_expanded_in_stack: false,
                                             exclude_from_sync: None,
+                                            run_instructions_to_ignore: [],
+                                            hide_floating_panes: false,
+                                            pane_initial_contents: None,
                                         },
                                     ],
                                     split_size: None,
@@ -1151,6 +1405,9 @@ Layout {
                                     children_are_stacked: false,
                                     is_expanded_in_stack: false,
                                     exclude_from_sync: None,
+                                    run_instructions_to_ignore: [],
+                                    hide_floating_panes: false,
+                                    pane_initial_contents: None,
                                 },
                             ],
                             split_size: None,
@@ -1161,6 +1418,9 @@ Layout {
                             children_are_stacked: false,
                             is_expanded_in_stack: false,
                             exclude_from_sync: None,
+                            run_instructions_to_ignore: [],
+                            hide_floating_panes: false,
+                            pane_initial_contents: None,
                         },
                         TiledPaneLayout {
                             children_split_direction: Horizontal,
@@ -1168,19 +1428,23 @@ Layout {
                             children: [],
                             split_size: Some(
                                 Fixed(
-                                    2,
+                                    1,
                                 ),
                             ),
                             run: Some(
                                 Plugin(
-                                    RunPlugin {
-                                        _allow_exec_host_cmd: false,
-                                        location: Zellij(
-                                            PluginTag(
-                                                "status-bar",
+                                    Alias(
+                                        PluginAlias {
+                                            name: "status-bar",
+                                            configuration: Some(
+                                                PluginUserConfiguration(
+                                                    {},
+                                                ),
                                             ),
-                                        ),
-                                    },
+                                            initial_cwd: None,
+                                            run_plugin: None,
+                                        },
+                                    ),
                                 ),
                             ),
                             borderless: true,
@@ -1189,6 +1453,9 @@ Layout {
                             children_are_stacked: false,
                             is_expanded_in_stack: false,
                             exclude_from_sync: None,
+                            run_instructions_to_ignore: [],
+                            hide_floating_panes: false,
+                            pane_initial_contents: None,
                         },
                     ],
                     split_size: None,
@@ -1199,6 +1466,9 @@ Layout {
                     children_are_stacked: false,
                     is_expanded_in_stack: false,
                     exclude_from_sync: None,
+                    run_instructions_to_ignore: [],
+                    hide_floating_panes: false,
+                    pane_initial_contents: None,
                 },
             },
             Some(
@@ -1224,14 +1494,18 @@ Layout {
                             ),
                             run: Some(
                                 Plugin(
-                                    RunPlugin {
-                                        _allow_exec_host_cmd: false,
-                                        location: Zellij(
-                                            PluginTag(
-                                                "tab-bar",
+                                    Alias(
+                                        PluginAlias {
+                                            name: "tab-bar",
+                                            configuration: Some(
+                                                PluginUserConfiguration(
+                                                    {},
+                                                ),
                                             ),
-                                        ),
-                                    },
+                                            initial_cwd: None,
+                                            run_plugin: None,
+                                        },
+                                    ),
                                 ),
                             ),
                             borderless: true,
@@ -1240,6 +1514,9 @@ Layout {
                             children_are_stacked: false,
                             is_expanded_in_stack: false,
                             exclude_from_sync: None,
+                            run_instructions_to_ignore: [],
+                            hide_floating_panes: false,
+                            pane_initial_contents: None,
                         },
                         TiledPaneLayout {
                             children_split_direction: Horizontal,
@@ -1261,6 +1538,9 @@ Layout {
                                             children_are_stacked: false,
                                             is_expanded_in_stack: false,
                                             exclude_from_sync: None,
+                                            run_instructions_to_ignore: [],
+                                            hide_floating_panes: false,
+                                            pane_initial_contents: None,
                                         },
                                         TiledPaneLayout {
                                             children_split_direction: Horizontal,
@@ -1276,6 +1556,9 @@ Layout {
                                             children_are_stacked: true,
                                             is_expanded_in_stack: false,
                                             exclude_from_sync: None,
+                                            run_instructions_to_ignore: [],
+                                            hide_floating_panes: false,
+                                            pane_initial_contents: None,
                                         },
                                     ],
                                     split_size: None,
@@ -1286,6 +1569,9 @@ Layout {
                                     children_are_stacked: false,
                                     is_expanded_in_stack: false,
                                     exclude_from_sync: None,
+                                    run_instructions_to_ignore: [],
+                                    hide_floating_panes: false,
+                                    pane_initial_contents: None,
                                 },
                             ],
                             split_size: None,
@@ -1296,6 +1582,9 @@ Layout {
                             children_are_stacked: false,
                             is_expanded_in_stack: false,
                             exclude_from_sync: None,
+                            run_instructions_to_ignore: [],
+                            hide_floating_panes: false,
+                            pane_initial_contents: None,
                         },
                         TiledPaneLayout {
                             children_split_direction: Horizontal,
@@ -1303,19 +1592,23 @@ Layout {
                             children: [],
                             split_size: Some(
                                 Fixed(
-                                    2,
+                                    1,
                                 ),
                             ),
                             run: Some(
                                 Plugin(
-                                    RunPlugin {
-                                        _allow_exec_host_cmd: false,
-                                        location: Zellij(
-                                            PluginTag(
-                                                "status-bar",
+                                    Alias(
+                                        PluginAlias {
+                                            name: "status-bar",
+                                            configuration: Some(
+                                                PluginUserConfiguration(
+                                                    {},
+                                                ),
                                             ),
-                                        ),
-                                    },
+                                            initial_cwd: None,
+                                            run_plugin: None,
+                                        },
+                                    ),
                                 ),
                             ),
                             borderless: true,
@@ -1324,6 +1617,9 @@ Layout {
                             children_are_stacked: false,
                             is_expanded_in_stack: false,
                             exclude_from_sync: None,
+                            run_instructions_to_ignore: [],
+                            hide_floating_panes: false,
+                            pane_initial_contents: None,
                         },
                     ],
                     split_size: None,
@@ -1334,6 +1630,9 @@ Layout {
                     children_are_stacked: false,
                     is_expanded_in_stack: false,
                     exclude_from_sync: None,
+                    run_instructions_to_ignore: [],
+                    hide_floating_panes: false,
+                    pane_initial_contents: None,
                 },
             },
             Some(
@@ -1377,8 +1676,12 @@ Layout {
                                 1,
                             ),
                         ),
+                        pinned: None,
                         run: None,
                         focus: None,
+                        already_running: false,
+                        pane_initial_contents: None,
+                        logical_position: None,
                     },
                     FloatingPaneLayout {
                         name: None,
@@ -1402,8 +1705,12 @@ Layout {
                                 2,
                             ),
                         ),
+                        pinned: None,
                         run: None,
                         focus: None,
+                        already_running: false,
+                        pane_initial_contents: None,
+                        logical_position: None,
                     },
                     FloatingPaneLayout {
                         name: None,
@@ -1427,8 +1734,12 @@ Layout {
                                 3,
                             ),
                         ),
+                        pinned: None,
                         run: None,
                         focus: None,
+                        already_running: false,
+                        pane_initial_contents: None,
+                        logical_position: None,
                     },
                     FloatingPaneLayout {
                         name: None,
@@ -1452,8 +1763,12 @@ Layout {
                                 4,
                             ),
                         ),
+                        pinned: None,
                         run: None,
                         focus: None,
+                        already_running: false,
+                        pane_initial_contents: None,
+                        logical_position: None,
                     },
                     FloatingPaneLayout {
                         name: None,
@@ -1477,8 +1792,12 @@ Layout {
                                 5,
                             ),
                         ),
+                        pinned: None,
                         run: None,
                         focus: None,
+                        already_running: false,
+                        pane_initial_contents: None,
+                        logical_position: None,
                     },
                     FloatingPaneLayout {
                         name: None,
@@ -1502,8 +1821,12 @@ Layout {
                                 6,
                             ),
                         ),
+                        pinned: None,
                         run: None,
                         focus: None,
+                        already_running: false,
+                        pane_initial_contents: None,
+                        logical_position: None,
                     },
                     FloatingPaneLayout {
                         name: None,
@@ -1527,8 +1850,12 @@ Layout {
                                 7,
                             ),
                         ),
+                        pinned: None,
                         run: None,
                         focus: None,
+                        already_running: false,
+                        pane_initial_contents: None,
+                        logical_position: None,
                     },
                     FloatingPaneLayout {
                         name: None,
@@ -1552,8 +1879,12 @@ Layout {
                                 8,
                             ),
                         ),
+                        pinned: None,
                         run: None,
                         focus: None,
+                        already_running: false,
+                        pane_initial_contents: None,
+                        logical_position: None,
                     },
                     FloatingPaneLayout {
                         name: None,
@@ -1577,8 +1908,12 @@ Layout {
                                 9,
                             ),
                         ),
+                        pinned: None,
                         run: None,
                         focus: None,
+                        already_running: false,
+                        pane_initial_contents: None,
+                        logical_position: None,
                     },
                     FloatingPaneLayout {
                         name: None,
@@ -1602,10 +1937,12 @@ Layout {
                                 10,
                             ),
                         ),
+                        pinned: None,
                         run: None,
-                        focus: Some(
-                            true,
-                        ),
+                        focus: None,
+                        already_running: false,
+                        pane_initial_contents: None,
+                        logical_position: None,
                     },
                 ],
             },
@@ -1632,8 +1969,12 @@ Layout {
                                 50,
                             ),
                         ),
+                        pinned: None,
                         run: None,
                         focus: None,
+                        already_running: false,
+                        pane_initial_contents: None,
+                        logical_position: None,
                     },
                 ],
                 MaxPanes(
@@ -1657,8 +1998,12 @@ Layout {
                                 25,
                             ),
                         ),
+                        pinned: None,
                         run: None,
                         focus: None,
+                        already_running: false,
+                        pane_initial_contents: None,
+                        logical_position: None,
                     },
                     FloatingPaneLayout {
                         name: None,
@@ -1678,8 +2023,12 @@ Layout {
                                 25,
                             ),
                         ),
+                        pinned: None,
                         run: None,
                         focus: None,
+                        already_running: false,
+                        pane_initial_contents: None,
+                        logical_position: None,
                     },
                 ],
                 MaxPanes(
@@ -1703,10 +2052,12 @@ Layout {
                                 55,
                             ),
                         ),
+                        pinned: None,
                         run: None,
-                        focus: Some(
-                            true,
-                        ),
+                        focus: None,
+                        already_running: false,
+                        pane_initial_contents: None,
+                        logical_position: None,
                     },
                     FloatingPaneLayout {
                         name: None,
@@ -1726,8 +2077,12 @@ Layout {
                                 1,
                             ),
                         ),
+                        pinned: None,
                         run: None,
                         focus: None,
+                        already_running: false,
+                        pane_initial_contents: None,
+                        logical_position: None,
                     },
                     FloatingPaneLayout {
                         name: None,
@@ -1747,8 +2102,12 @@ Layout {
                                 1,
                             ),
                         ),
+                        pinned: None,
                         run: None,
                         focus: None,
+                        already_running: false,
+                        pane_initial_contents: None,
+                        logical_position: None,
                     },
                 ],
                 MaxPanes(
@@ -1776,8 +2135,12 @@ Layout {
                                 55,
                             ),
                         ),
+                        pinned: None,
                         run: None,
                         focus: None,
+                        already_running: false,
+                        pane_initial_contents: None,
+                        logical_position: None,
                     },
                     FloatingPaneLayout {
                         name: None,
@@ -1801,10 +2164,12 @@ Layout {
                                 55,
                             ),
                         ),
+                        pinned: None,
                         run: None,
-                        focus: Some(
-                            true,
-                        ),
+                        focus: None,
+                        already_running: false,
+                        pane_initial_contents: None,
+                        logical_position: None,
                     },
                     FloatingPaneLayout {
                         name: None,
@@ -1828,8 +2193,12 @@ Layout {
                                 1,
                             ),
                         ),
+                        pinned: None,
                         run: None,
                         focus: None,
+                        already_running: false,
+                        pane_initial_contents: None,
+                        logical_position: None,
                     },
                     FloatingPaneLayout {
                         name: None,
@@ -1853,8 +2222,12 @@ Layout {
                                 1,
                             ),
                         ),
+                        pinned: None,
                         run: None,
                         focus: None,
+                        already_running: false,
+                        pane_initial_contents: None,
+                        logical_position: None,
                     },
                 ],
             },

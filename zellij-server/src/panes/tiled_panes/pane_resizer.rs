@@ -54,7 +54,10 @@ impl<'a> PaneResizer<'a> {
         let spans = self
             .discretize_spans(grid, space)
             .map_err(|err| anyhow!("{}", err))?;
-        self.apply_spans(spans)?;
+
+        if self.is_layout_valid(&spans) {
+            self.apply_spans(spans)?;
+        }
         Ok(())
     }
 
@@ -128,6 +131,31 @@ impl<'a> PaneResizer<'a> {
         Ok(grid.into_iter().flatten().collect())
     }
 
+    // HACK: This whole function is a bit of a hack — it's here to stop us from breaking the layout if we've been given
+    // a bad state to start with. If this function returns false, nothing is resized.
+    fn is_layout_valid(&self, spans: &[Span]) -> bool {
+        // If pane stacks are too tall to fit on the screen, abandon ship before the status bar gets caught up in
+        // any erroneous resizing...
+        for span in spans {
+            let pane_is_stacked = self
+                .panes
+                .borrow()
+                .get(&span.pid)
+                .unwrap()
+                .current_geom()
+                .is_stacked();
+            if pane_is_stacked && span.direction == SplitDirection::Vertical {
+                let min_stack_height = StackedPanes::new(self.panes.clone())
+                    .min_stack_height(&span.pid)
+                    .unwrap();
+                if span.size.as_usize() < min_stack_height {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
     fn apply_spans(&mut self, spans: Vec<Span>) -> Result<()> {
         let err_context = || format!("Failed to apply spans");
         let mut geoms_changed = false;
@@ -138,7 +166,7 @@ impl<'a> PaneResizer<'a> {
                 .get(&span.pid)
                 .unwrap()
                 .current_geom()
-                .is_stacked;
+                .is_stacked();
             if pane_is_stacked {
                 let current_geom = StackedPanes::new(self.panes.clone())
                     .position_and_size_of_stack(&span.pid)
@@ -156,7 +184,6 @@ impl<'a> PaneResizer<'a> {
                     },
                 };
                 StackedPanes::new(self.panes.clone()).resize_panes_in_stack(&span.pid, new_geom)?;
-                // TODO: test with geom_override (fullscreen)
                 if new_geom.rows.as_usize() != current_geom.rows.as_usize()
                     || new_geom.cols.as_usize() != current_geom.cols.as_usize()
                 {
@@ -248,10 +275,10 @@ impl<'a> PaneResizer<'a> {
     fn get_span(&self, direction: SplitDirection, pane: &dyn Pane) -> Option<Span> {
         let position_and_size = {
             let pas = pane.current_geom();
-            if pas.is_stacked && pas.rows.is_percent() {
+            if pas.is_stacked() && pas.rows.is_percent() {
                 // this is the main pane of the stack
                 StackedPanes::new(self.panes.clone()).position_and_size_of_stack(&pane.pid())
-            } else if pas.is_stacked {
+            } else if pas.is_stacked() {
                 // this is a one-liner stacked pane and should be handled as the same rect with
                 // the rest of the stack, represented by the main pane in the if branch above
                 None

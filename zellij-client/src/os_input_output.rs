@@ -8,6 +8,7 @@ use nix::pty::Winsize;
 use nix::sys::termios;
 use signal_hook::{consts::signal::*, iterator::Signals};
 use std::io::prelude::*;
+use std::io::IsTerminal;
 use std::os::unix::io::RawFd;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -21,8 +22,10 @@ use zellij_utils::{
 
 const SIGWINCH_CB_THROTTLE_DURATION: time::Duration = time::Duration::from_millis(50);
 
-const ENABLE_MOUSE_SUPPORT: &str = "\u{1b}[?1000h\u{1b}[?1002h\u{1b}[?1015h\u{1b}[?1006h";
-const DISABLE_MOUSE_SUPPORT: &str = "\u{1b}[?1006l\u{1b}[?1015l\u{1b}[?1002l\u{1b}[?1000l";
+const ENABLE_MOUSE_SUPPORT: &str =
+    "\u{1b}[?1000h\u{1b}[?1002h\u{1b}[?1003h\u{1b}[?1015h\u{1b}[?1006h";
+const DISABLE_MOUSE_SUPPORT: &str =
+    "\u{1b}[?1006l\u{1b}[?1015l\u{1b}[?1003l\u{1b}[?1002l\u{1b}[?1000l";
 
 fn into_raw_mode(pid: RawFd) {
     let mut tio = termios::tcgetattr(pid).expect("could not get terminal attribute");
@@ -78,6 +81,8 @@ pub struct ClientOsInputOutput {
     orig_termios: Option<Arc<Mutex<termios::Termios>>>,
     send_instructions_to_server: Arc<Mutex<Option<IpcSenderWithContext<ClientToServerMsg>>>>,
     receive_instructions_from_server: Arc<Mutex<Option<IpcReceiverWithContext<ServerToClientMsg>>>>,
+    reading_from_stdin: Arc<Mutex<Option<Vec<u8>>>>,
+    session_name: Arc<Mutex<Option<String>>>,
 }
 
 /// The `ClientOsApi` trait represents an abstract interface to the features of an operating system that
@@ -93,9 +98,17 @@ pub trait ClientOsApi: Send + Sync {
     fn unset_raw_mode(&self, fd: RawFd) -> Result<(), nix::Error>;
     /// Returns the writer that allows writing to standard output.
     fn get_stdout_writer(&self) -> Box<dyn io::Write>;
-    fn get_stdin_reader(&self) -> Box<dyn io::Read>;
+    /// Returns a BufReader that allows to read from STDIN line by line, also locks STDIN
+    fn get_stdin_reader(&self) -> Box<dyn io::BufRead>;
+    fn stdin_is_terminal(&self) -> bool {
+        true
+    }
+    fn stdout_is_terminal(&self) -> bool {
+        true
+    }
+    fn update_session_name(&mut self, new_session_name: String);
     /// Returns the raw contents of standard input.
-    fn read_from_stdin(&mut self) -> Vec<u8>;
+    fn read_from_stdin(&mut self) -> Result<Vec<u8>, &'static str>;
     /// Returns a [`Box`] pointer to this [`ClientOsApi`] struct.
     fn box_clone(&self) -> Box<dyn ClientOsApi>;
     /// Sends a message to the server.
@@ -111,6 +124,9 @@ pub trait ClientOsApi: Send + Sync {
     fn disable_mouse(&self) -> Result<()>;
     // Repeatedly send action, until stdin is readable again
     fn stdin_poller(&self) -> StdinPoller;
+    fn env_variable(&self, _name: &str) -> Option<String> {
+        None
+    }
 }
 
 impl ClientOsApi for ClientOsInputOutput {
@@ -135,22 +151,65 @@ impl ClientOsApi for ClientOsInputOutput {
     fn box_clone(&self) -> Box<dyn ClientOsApi> {
         Box::new((*self).clone())
     }
-    fn read_from_stdin(&mut self) -> Vec<u8> {
-        let stdin = std::io::stdin();
-        let mut stdin = stdin.lock();
-        let buffer = stdin.fill_buf().unwrap();
-        let length = buffer.len();
-        let read_bytes = Vec::from(buffer);
-        stdin.consume(length);
-        read_bytes
+    fn update_session_name(&mut self, new_session_name: String) {
+        *self.session_name.lock().unwrap() = Some(new_session_name);
+    }
+    fn read_from_stdin(&mut self) -> Result<Vec<u8>, &'static str> {
+        let session_name_at_calltime = { self.session_name.lock().unwrap().clone() };
+        // here we wait for a lock in case another thread is holding stdin
+        // this can happen for example when switching sessions, the old thread will only be
+        // released once it sees input over STDIN
+        //
+        // when this happens, we detect in the other thread that our session is ended (by comparing
+        // the session name at the beginning of the call and the one after we read from STDIN), and
+        // so place what we read from STDIN inside a buffer (the "reading_from_stdin" on our state)
+        // and release the lock
+        //
+        // then, another thread will see there's something in the buffer immediately as it acquires
+        // the lock (without having to wait for STDIN itself) forward this buffer and proceed to
+        // wait for the "real" STDIN net time it is called
+        let mut buffered_bytes = self.reading_from_stdin.lock().unwrap();
+        match buffered_bytes.take() {
+            Some(buffered_bytes) => Ok(buffered_bytes),
+            None => {
+                let stdin = std::io::stdin();
+                let mut stdin = stdin.lock();
+                let buffer = stdin.fill_buf().unwrap();
+                let length = buffer.len();
+                let read_bytes = Vec::from(buffer);
+                stdin.consume(length);
+
+                let session_name_after_reading_from_stdin =
+                    { self.session_name.lock().unwrap().clone() };
+                if session_name_at_calltime.is_some()
+                    && session_name_at_calltime != session_name_after_reading_from_stdin
+                {
+                    *buffered_bytes = Some(read_bytes);
+                    Err("Session ended")
+                } else {
+                    Ok(read_bytes)
+                }
+            },
+        }
     }
     fn get_stdout_writer(&self) -> Box<dyn io::Write> {
         let stdout = ::std::io::stdout();
         Box::new(stdout)
     }
-    fn get_stdin_reader(&self) -> Box<dyn io::Read> {
+
+    fn get_stdin_reader(&self) -> Box<dyn io::BufRead> {
         let stdin = ::std::io::stdin();
-        Box::new(stdin)
+        Box::new(stdin.lock())
+    }
+
+    fn stdin_is_terminal(&self) -> bool {
+        let stdin = ::std::io::stdin();
+        stdin.is_terminal()
+    }
+
+    fn stdout_is_terminal(&self) -> bool {
+        let stdout = ::std::io::stdout();
+        stdout.is_terminal()
     }
 
     fn send_to_server(&self, msg: ClientToServerMsg) {
@@ -247,6 +306,10 @@ impl ClientOsApi for ClientOsInputOutput {
     fn stdin_poller(&self) -> StdinPoller {
         StdinPoller::default()
     }
+
+    fn env_variable(&self, name: &str) -> Option<String> {
+        std::env::var(name).ok()
+    }
 }
 
 impl Clone for Box<dyn ClientOsApi> {
@@ -256,21 +319,27 @@ impl Clone for Box<dyn ClientOsApi> {
 }
 
 pub fn get_client_os_input() -> Result<ClientOsInputOutput, nix::Error> {
-    let current_termios = termios::tcgetattr(0)?;
-    let orig_termios = Some(Arc::new(Mutex::new(current_termios)));
+    let current_termios = termios::tcgetattr(0).ok();
+    let orig_termios = current_termios.map(|termios| Arc::new(Mutex::new(termios)));
+    let reading_from_stdin = Arc::new(Mutex::new(None));
     Ok(ClientOsInputOutput {
         orig_termios,
         send_instructions_to_server: Arc::new(Mutex::new(None)),
         receive_instructions_from_server: Arc::new(Mutex::new(None)),
+        reading_from_stdin,
+        session_name: Arc::new(Mutex::new(None)),
     })
 }
 
 pub fn get_cli_client_os_input() -> Result<ClientOsInputOutput, nix::Error> {
     let orig_termios = None; // not a terminal
+    let reading_from_stdin = Arc::new(Mutex::new(None));
     Ok(ClientOsInputOutput {
         orig_termios,
         send_instructions_to_server: Arc::new(Mutex::new(None)),
         receive_instructions_from_server: Arc::new(Mutex::new(None)),
+        reading_from_stdin,
+        session_name: Arc::new(Mutex::new(None)),
     })
 }
 

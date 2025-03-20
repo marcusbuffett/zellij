@@ -10,6 +10,13 @@ server](https://discord.gg/MHV3n76PDq), or on [Matrix](https://matrix.to/#/#zell
 Before contributing please read our [Code of Conduct](CODE_OF_CONDUCT.md) which
 all contributors are expected to adhere to.
 
+## Status of Code Contributions (PRs)
+At the moment, the Zellij maintainers are very much overloaded implementing our [Roadmap](https://zellij.dev/roadmap) - and so while we very much welcome and appreciate the community's willingness to contribute - we are only able to accept code contributions for larger projects as they appear in said Roadmap.
+
+For those willing to take up such large projects, please check with the maintainers first (eg. by asking on the general chat in one of our chat platforms) to make sure there is both willingness and availability on our sides.
+
+If you're still eager to contribute minor fixes, please note that we might take a long while to get to them.
+
 ## Building
 
 To build Zellij, we're using cargo xtask. This is a standalone package shipped
@@ -17,6 +24,8 @@ inside the repository, so you don't have to install additional dependencies.
 
 To edit our manpage, the mandown crate (`cargo install --locked
 mandown`) is used and the work is done on a markdown file in docs/MANPAGE.md.
+
+To build zellij, you'll need [`protoc`](https://github.com/protocolbuffers/protobuf#protobuf-compiler-installation) installed. This is used to compile the .proto files into Rust assets. These protocol buffers are used for communication between Zellij and its plugins across the wasm boundary.
 
 Here are some of the commands currently supported by the build system:
 
@@ -83,7 +92,7 @@ Note that the output is truncated at 100KB. This can be adjusted for the purpose
 When running Zellij with the `--debug` flag, Zellij will dump a copy of all bytes received over the pty for each pane in: `/$temp_dir/zellij-<UID>/zellij-log/zellij-<pane_id>.log`. These might be useful when troubleshooting terminal issues.
 
 ## Testing plugins
-Zellij allows the use of the [Singlepass](https://crates.io/crates/wasmer-compiler-singlepass) compiler for wasmer. This can enable great gains in compilation time of plugins in detriment of stability, notably on Arm64 architectures.
+Zellij allows the use of the singlepass [Winch](https://crates.io/crates/wasmtime-winch) compiler for wasmtime. This can enable great gains in compilation time of plugins at the cost of slower execution and less supported architectures.
 
 To enable the singlepass compiler, use the `singlepass` flag. E.g.:
 ```sh
@@ -104,7 +113,7 @@ If you are new contributor to `Zellij` going through
 [Discord server][discord-invite-link], we would be happy to help finding
 something interesting to work on and guide through.
 
-[discord-invite-link]: https://discord.gg/feHDHahHCz 
+[discord-invite-link]: https://discord.gg/feHDHahHCz
 [good-first-issue]: https://github.com/zellij-org/zellij/labels/good%20first%20issue
 
 

@@ -257,6 +257,7 @@ pub enum ScreenContext {
     Exit,
     ClearScreen,
     DumpScreen,
+    DumpLayout,
     EditScrollback,
     ScrollUp,
     ScrollUpAt,
@@ -290,6 +291,8 @@ pub enum ScreenContext {
     GoToTabName,
     UpdateTabName,
     UndoRenameTab,
+    MoveTabLeft,
+    MoveTabRight,
     TerminalResize,
     TerminalPixelDimensions,
     TerminalBackgroundColor,
@@ -303,9 +306,7 @@ pub enum ScreenContext {
     LeftMouseRelease,
     RightMouseRelease,
     MiddleMouseRelease,
-    MouseHoldLeft,
-    MouseHoldRight,
-    MouseHoldMiddle,
+    MouseEvent,
     Copy,
     ToggleTab,
     AddClient,
@@ -333,6 +334,47 @@ pub enum ScreenContext {
     ProgressPluginLoadingOffset,
     StartPluginLoadingIndication,
     RequestStateUpdateForPlugins,
+    LaunchOrFocusPlugin,
+    LaunchPlugin,
+    SuppressPane,
+    FocusPaneWithId,
+    RenamePane,
+    RenameTab,
+    RequestPluginPermissions,
+    BreakPane,
+    BreakPaneRight,
+    BreakPaneLeft,
+    UpdateSessionInfos,
+    ReplacePane,
+    NewInPlacePluginPane,
+    DumpLayoutToHd,
+    RenameSession,
+    DumpLayoutToPlugin,
+    ListClientsMetadata,
+    Reconfigure,
+    RerunCommandPane,
+    ResizePaneWithId,
+    EditScrollbackForPaneWithId,
+    WriteToPaneId,
+    MovePaneWithPaneId,
+    MovePaneWithPaneIdInDirection,
+    ClearScreenForPaneId,
+    ScrollUpInPaneId,
+    ScrollDownInPaneId,
+    ScrollToTopInPaneId,
+    ScrollToBottomInPaneId,
+    PageScrollUpInPaneId,
+    PageScrollDownInPaneId,
+    TogglePaneIdFullscreen,
+    TogglePaneEmbedOrEjectForPaneId,
+    CloseTabWithIndex,
+    BreakPanesToNewTab,
+    BreakPanesToTabWithIndex,
+    ListClientsToPlugin,
+    TogglePanePinned,
+    SetFloatingPanePinned,
+    StackPanes,
+    ChangeFloatingPanesCoordinates,
 }
 
 /// Stack call representations corresponding to the different types of [`PtyInstruction`]s.
@@ -348,6 +390,15 @@ pub enum PtyContext {
     ClosePane,
     CloseTab,
     ReRunCommandInPane,
+    DropToShellInPane,
+    SpawnInPlaceTerminal,
+    DumpLayout,
+    LogLayoutToHd,
+    FillPluginCwd,
+    DumpLayoutToPlugin,
+    ListClientsMetadata,
+    Reconfigure,
+    ListClientsToPlugin,
     Exit,
 }
 
@@ -355,16 +406,38 @@ pub enum PtyContext {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum PluginContext {
     Load,
+    LoadBackgroundPlugin,
     Update,
     Render,
     Unload,
     Reload,
+    ReloadPluginWithId,
     Resize,
     Exit,
     AddClient,
     RemoveClient,
     NewTab,
     ApplyCachedEvents,
+    ApplyCachedWorkerMessages,
+    PostMessageToPluginWorker,
+    PostMessageToPlugin,
+    PluginSubscribedToEvents,
+    PermissionRequestResult,
+    DumpLayout,
+    LogLayoutToHd,
+    CliPipe,
+    Message,
+    CachePluginEvents,
+    MessageFromPlugin,
+    UnblockCliPipes,
+    WatchFilesystem,
+    KeybindPipe,
+    DumpLayoutToPlugin,
+    ListClientsMetadata,
+    Reconfigure,
+    FailedToWriteConfigToDisk,
+    ListClientsToPlugin,
+    ChangePluginHostDir,
 }
 
 /// Stack call representations corresponding to the different types of [`ClientInstruction`]s.
@@ -377,11 +450,17 @@ pub enum ClientContext {
     ServerError,
     SwitchToMode,
     Connected,
-    ActiveClients,
     Log,
+    LogError,
     OwnClientId,
     StartedParsingStdinQuery,
     DoneParsingStdinQuery,
+    SwitchSession,
+    SetSynchronisedOutput,
+    UnblockCliPipeInput,
+    CliPipeOutput,
+    QueryTerminalSize,
+    WriteConfigToDisk,
 }
 
 /// Stack call representations corresponding to the different types of [`ServerInstruction`]s.
@@ -397,13 +476,27 @@ pub enum ServerContext {
     DetachSession,
     AttachClient,
     ConnStatus,
-    ActiveClients,
     Log,
+    LogError,
+    SwitchSession,
+    UnblockCliPipeInput,
+    CliPipeOutput,
+    AssociatePipeWithClient,
+    DisconnectAllClientsExcept,
+    ChangeMode,
+    ChangeModeForAllClients,
+    Reconfigure,
+    ConfigWrittenToDisk,
+    FailedToWriteConfigToDisk,
+    RebindKeys,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum PtyWriteContext {
     Write,
+    ResizePty,
+    StartCachingResizes,
+    ApplyCachedResizes,
     Exit,
 }
 
@@ -412,6 +505,12 @@ pub enum BackgroundJobContext {
     DisplayPaneError,
     AnimatePluginLoading,
     StopPluginLoadingAnimation,
+    ReadAllSessionInfosOnMachine,
+    ReportSessionInfo,
+    ReportLayoutInfo,
+    RunCommand,
+    WebRequest,
+    ReportPluginList,
     Exit,
 }
 
@@ -506,7 +605,7 @@ mod not_wasm {
     use super::*;
     use crate::channels::{SenderWithContext, ASYNCOPENCALLS, OPENCALLS};
     use miette::{Diagnostic, GraphicalReportHandler, GraphicalTheme, Report};
-    use std::panic::PanicInfo;
+    use std::panic::PanicHookInfo;
     use thiserror::Error as ThisError;
 
     /// The maximum amount of calls an [`ErrorContext`] will keep track
@@ -551,7 +650,7 @@ mod not_wasm {
     }
 
     /// Custom panic handler/hook. Prints the [`ErrorContext`].
-    pub fn handle_panic<T>(info: &PanicInfo<'_>, sender: &SenderWithContext<T>)
+    pub fn handle_panic<T>(info: &PanicHookInfo<'_>, sender: &SenderWithContext<T>)
     where
         T: ErrorInstruction + Clone,
     {

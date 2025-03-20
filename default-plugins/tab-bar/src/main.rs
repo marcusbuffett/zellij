@@ -2,8 +2,10 @@ mod line;
 mod tab;
 
 use std::cmp::{max, min};
+use std::collections::BTreeMap;
 use std::convert::TryInto;
 
+use tab::get_tab_to_focus;
 use zellij_tile::prelude::*;
 
 use crate::line::tab_line;
@@ -16,13 +18,20 @@ pub struct LinePart {
     tab_index: Option<usize>,
 }
 
+impl LinePart {
+    pub fn append(&mut self, to_append: &LinePart) {
+        self.part.push_str(&to_append.part);
+        self.len += to_append.len;
+    }
+}
+
 #[derive(Default)]
 struct State {
     tabs: Vec<TabInfo>,
     active_tab_idx: usize,
     mode_info: ModeInfo,
-    mouse_click_pos: usize,
-    should_change_tab: bool,
+    tab_line: Vec<LinePart>,
+    hide_swap_layout_indication: bool,
 }
 
 static ARROW_SEPARATOR: &str = "";
@@ -30,7 +39,11 @@ static ARROW_SEPARATOR: &str = "";
 register_plugin!(State);
 
 impl ZellijPlugin for State {
-    fn load(&mut self) {
+    fn load(&mut self, configuration: BTreeMap<String, String>) {
+        self.hide_swap_layout_indication = configuration
+            .get("hide_swap_layout_indication")
+            .map(|s| s == "true")
+            .unwrap_or(false);
         set_selectable(false);
         subscribe(&[
             EventType::TabUpdate,
@@ -52,6 +65,7 @@ impl ZellijPlugin for State {
                 if let Some(active_tab_index) = tabs.iter().position(|t| t.active) {
                     // tabs are indexed starting from 1 so we need to add 1
                     let active_tab_idx = active_tab_index + 1;
+
                     if self.active_tab_idx != active_tab_idx || self.tabs != tabs {
                         should_render = true;
                     }
@@ -63,18 +77,15 @@ impl ZellijPlugin for State {
             },
             Event::Mouse(me) => match me {
                 Mouse::LeftClick(_, col) => {
-                    if self.mouse_click_pos != col {
-                        should_render = true;
-                        self.should_change_tab = true;
+                    let tab_to_focus = get_tab_to_focus(&self.tab_line, self.active_tab_idx, col);
+                    if let Some(idx) = tab_to_focus {
+                        switch_tab_to(idx.try_into().unwrap());
                     }
-                    self.mouse_click_pos = col;
                 },
                 Mouse::ScrollUp(_) => {
-                    should_render = true;
                     switch_tab_to(min(self.active_tab_idx + 1, self.tabs.len()) as u32);
                 },
                 Mouse::ScrollDown(_) => {
-                    should_render = true;
                     switch_tab_to(max(self.active_tab_idx.saturating_sub(1), 1) as u32);
                 },
                 _ => {},
@@ -113,7 +124,10 @@ impl ZellijPlugin for State {
             is_alternate_tab = !is_alternate_tab;
             all_tabs.push(tab);
         }
-        let tab_line = tab_line(
+
+        let background = self.mode_info.style.colors.text_unselected.background;
+
+        self.tab_line = tab_line(
             self.mode_info.session_name.as_deref(),
             all_tabs,
             active_tab_index,
@@ -121,35 +135,24 @@ impl ZellijPlugin for State {
             self.mode_info.style.colors,
             self.mode_info.capabilities,
             self.mode_info.style.hide_session_name,
+            self.tabs.iter().find(|t| t.active),
+            &self.mode_info,
+            self.hide_swap_layout_indication,
+            &background,
         );
-        let mut s = String::new();
-        let mut len_cnt = 0;
-        for bar_part in tab_line {
-            s = format!("{}{}", s, &bar_part.part);
 
-            if self.should_change_tab
-                && self.mouse_click_pos >= len_cnt
-                && self.mouse_click_pos < len_cnt + bar_part.len
-                && bar_part.tab_index.is_some()
-            {
-                // Tabs are indexed starting from 1, therefore we need add 1 to tab_index.
-                let tab_index: u32 = bar_part.tab_index.unwrap().try_into().unwrap();
-                switch_tab_to(tab_index + 1);
-            }
-            len_cnt += bar_part.len;
-        }
-        let background = match self.mode_info.style.colors.theme_hue {
-            ThemeHue::Dark => self.mode_info.style.colors.black,
-            ThemeHue::Light => self.mode_info.style.colors.white,
-        };
+        let output = self
+            .tab_line
+            .iter()
+            .fold(String::new(), |output, part| output + &part.part);
+
         match background {
             PaletteColor::Rgb((r, g, b)) => {
-                print!("{}\u{1b}[48;2;{};{};{}m\u{1b}[0K", s, r, g, b);
+                print!("{}\u{1b}[48;2;{};{};{}m\u{1b}[0K", output, r, g, b);
             },
             PaletteColor::EightBit(color) => {
-                print!("{}\u{1b}[48;5;{}m\u{1b}[0K", s, color);
+                print!("{}\u{1b}[48;5;{}m\u{1b}[0K", output, color);
             },
         }
-        self.should_change_tab = false;
     }
 }

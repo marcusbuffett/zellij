@@ -1,10 +1,10 @@
 //! IPC stuff for starting to split things into a client and server model.
 use crate::{
     cli::CliArgs,
-    data::{ClientId, InputMode, Style},
+    data::{ClientId, ConnectToSession, KeyWithModifier, Style},
     errors::{get_current_ctx, prelude::*, ErrorContext},
-    input::keybinds::Keybinds,
-    input::{actions::Action, layout::Layout, options::Options, plugins::PluginsConfig},
+    input::config::Config,
+    input::{actions::Action, layout::Layout, options::Options, plugins::PluginAliases},
     pane_size::{Size, SizeInPixels},
 };
 use interprocess::local_socket::LocalSocketStream;
@@ -16,6 +16,7 @@ use std::{
     io::{self, Write},
     marker::PhantomData,
     os::unix::io::{AsRawFd, FromRawFd},
+    path::PathBuf,
 };
 
 type SessionId = u64;
@@ -41,7 +42,6 @@ pub enum ClientType {
 pub struct ClientAttributes {
     pub size: Size,
     pub style: Style,
-    pub keybinds: Keybinds,
 }
 
 #[derive(Default, Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,16 +65,6 @@ impl PixelDimensions {
 #[allow(clippy::large_enum_variant)]
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum ClientToServerMsg {
-    /*// List which sessions are available
-    ListSessions,
-    // Create a new session
-    CreateSession,
-    // Attach to a running session
-    AttachToSession(SessionId, ClientType),
-    // Force detach
-    DetachSession(SessionId),
-    // Disconnect from the session we're connected to
-    DisconnectFromSession,*/
     DetachSession(Vec<ClientId>),
     TerminalPixelDimensions(PixelDimensions),
     BackgroundColor(String),
@@ -84,32 +74,42 @@ pub enum ClientToServerMsg {
     NewClient(
         ClientAttributes,
         Box<CliArgs>,
-        Box<Options>,
+        Box<Config>,  // represents the saved configuration
+        Box<Options>, // represents the runtime configuration
         Box<Layout>,
-        Option<PluginsConfig>,
+        Box<PluginAliases>,
+        bool, // should launch setup wizard
     ),
-    AttachClient(ClientAttributes, Options),
-    Action(Action, Option<ClientId>),
+    AttachClient(
+        ClientAttributes,
+        Config,              // represents the saved configuration
+        Options,             // represents the runtime configuration
+        Option<usize>,       // tab position to focus
+        Option<(u32, bool)>, // (pane_id, is_plugin) => pane id to focus
+    ),
+    Action(Action, Option<u32>, Option<ClientId>), // u32 is the terminal id
+    Key(KeyWithModifier, Vec<u8>, bool),           // key, raw_bytes, is_kitty_keyboard_protocol
     ClientExited,
     KillSession,
     ConnStatus,
-    ListClients,
+    ConfigWrittenToDisk(Config),
+    FailedToWriteConfigToDisk(Option<PathBuf>),
 }
 
 // Types of messages sent from the server to the client
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum ServerToClientMsg {
-    /*// Info about a particular session
-    SessionInfo(Session),
-    // A list of sessions
-    SessionList(HashSet<Session>),*/
     Render(String),
     UnblockInputThread,
     Exit(ExitReason),
-    SwitchToMode(InputMode),
     Connected,
-    ActiveClients(Vec<ClientId>),
     Log(Vec<String>),
+    LogError(Vec<String>),
+    SwitchSession(ConnectToSession),
+    UnblockCliPipeInput(String),   // String -> pipe name
+    CliPipeOutput(String, String), // String -> pipe name, String -> Output
+    QueryTerminalSize,
+    WriteConfigToDisk { config: String },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -185,9 +185,9 @@ impl<T: Serialize> IpcSenderWithContext<T> {
         if rmp_serde::encode::write(&mut self.sender, &(msg, err_ctx)).is_err() {
             Err(anyhow!("failed to send message to client"))
         } else {
-            // TODO: unwrapping here can cause issues when the server disconnects which we don't mind
-            // do we need to handle errors here in other cases?
-            let _ = self.sender.flush();
+            if let Err(e) = self.sender.flush() {
+                log::error!("Failed to flush ipc sender: {}", e);
+            }
             Ok(())
         }
     }

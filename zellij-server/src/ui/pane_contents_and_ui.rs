@@ -5,9 +5,7 @@ use crate::ui::boundaries::Boundaries;
 use crate::ui::pane_boundaries_frame::FrameParams;
 use crate::ClientId;
 use std::collections::HashMap;
-use zellij_utils::data::{
-    client_id_to_colors, single_client_color, InputMode, PaletteColor, Style,
-};
+use zellij_utils::data::{client_id_to_colors, InputMode, PaletteColor, Style};
 use zellij_utils::errors::prelude::*;
 pub struct PaneContentsAndUi<'a> {
     pane: &'a mut Box<dyn Pane>,
@@ -56,6 +54,10 @@ impl<'a> PaneContentsAndUi<'a> {
         clients: impl Iterator<Item = ClientId>,
     ) -> Result<()> {
         let err_context = "failed to render pane contents to multiple clients";
+
+        // here we drop the fake cursors so that their lines will be updated
+        // and we can clear them from the UI below
+        drop(self.pane.drain_fake_cursors());
 
         if let Some((character_chunks, raw_vte_output, sixel_image_chunks)) =
             self.pane.render(None).context(err_context)?
@@ -135,17 +137,30 @@ impl<'a> PaneContentsAndUi<'a> {
                 .with_context(|| {
                     format!("failed to render fake cursor if needed for client {client_id}")
                 })?;
-            if let Some(colors) = client_id_to_colors(*fake_cursor_client_id, self.style.colors) {
-                if let Some(vte_output) = self.pane.render_fake_cursor(colors.0, colors.1) {
-                    self.output.add_post_vte_instruction_to_client(
-                        client_id,
-                        &format!(
-                            "\u{1b}[{};{}H\u{1b}[m{}",
-                            self.pane.y() + 1,
-                            self.pane.x() + 1,
-                            vte_output
-                        ),
-                    );
+            if let Some(colors) = client_id_to_colors(
+                *fake_cursor_client_id,
+                self.style.colors.multiplayer_user_colors,
+            ) {
+                let cursor_is_visible = self
+                    .pane
+                    .cursor_coordinates()
+                    .map(|(x, y)| {
+                        self.output
+                            .cursor_is_visible(self.pane.x() + x, self.pane.y() + y)
+                    })
+                    .unwrap_or(false);
+                if cursor_is_visible {
+                    if let Some(vte_output) = self.pane.render_fake_cursor(colors.0, colors.1) {
+                        self.output.add_post_vte_instruction_to_client(
+                            client_id,
+                            &format!(
+                                "\u{1b}[{};{}H\u{1b}[m{}",
+                                self.pane.y() + 1,
+                                self.pane.x() + 1,
+                                vte_output
+                            ),
+                        );
+                    }
                 }
             }
         }
@@ -175,6 +190,7 @@ impl<'a> PaneContentsAndUi<'a> {
         client_id: ClientId,
         client_mode: InputMode,
         session_is_mirrored: bool,
+        pane_is_floating: bool,
     ) -> Result<()> {
         let err_context = || format!("failed to render pane frame for client {client_id}");
 
@@ -206,6 +222,8 @@ impl<'a> PaneContentsAndUi<'a> {
                 pane_is_stacked_over: self.pane_is_stacked_over,
                 pane_is_stacked_under: self.pane_is_stacked_under,
                 should_draw_pane_frames: self.should_draw_pane_frames,
+                pane_is_floating,
+                content_offset: self.pane.get_content_offset(),
             }
         } else {
             FrameParams {
@@ -218,6 +236,8 @@ impl<'a> PaneContentsAndUi<'a> {
                 pane_is_stacked_over: self.pane_is_stacked_over,
                 pane_is_stacked_under: self.pane_is_stacked_under,
                 should_draw_pane_frames: self.should_draw_pane_frames,
+                pane_is_floating,
+                content_offset: self.pane.get_content_offset(),
             }
         };
 
@@ -242,9 +262,17 @@ impl<'a> PaneContentsAndUi<'a> {
         client_mode: InputMode,
         boundaries: &mut Boundaries,
         session_is_mirrored: bool,
+        pane_is_on_top_of_stack: bool,
+        pane_is_on_bottom_of_stack: bool,
     ) {
         let color = self.frame_color(client_id, client_mode, session_is_mirrored);
-        boundaries.add_rect(self.pane.as_ref(), color);
+        boundaries.add_rect(
+            self.pane.as_ref(),
+            color,
+            pane_is_on_top_of_stack,
+            pane_is_on_bottom_of_stack,
+            self.pane_is_stacked_under,
+        );
     }
     fn frame_color(
         &self,
@@ -259,17 +287,19 @@ impl<'a> PaneContentsAndUi<'a> {
             match mode {
                 InputMode::Normal | InputMode::Locked => {
                     if session_is_mirrored || !self.multiple_users_exist_in_session {
-                        let colors = single_client_color(self.style.colors); // mirrored sessions only have one focused color
-                        Some(colors.0)
+                        Some(self.style.colors.frame_selected.base)
                     } else {
-                        let colors = client_id_to_colors(client_id, self.style.colors);
+                        let colors = client_id_to_colors(
+                            client_id,
+                            self.style.colors.multiplayer_user_colors,
+                        );
                         colors.map(|colors| colors.0)
                     }
                 },
-                _ => Some(self.style.colors.orange),
+                _ => Some(self.style.colors.frame_highlight.base),
             }
         } else {
-            None
+            self.style.colors.frame_unselected.map(|frame| frame.base)
         }
     }
 }

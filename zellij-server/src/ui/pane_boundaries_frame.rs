@@ -1,62 +1,45 @@
 use crate::output::CharacterChunk;
-use crate::panes::{AnsiCode, CharacterStyles, TerminalCharacter, EMPTY_TERMINAL_CHARACTER};
+use crate::panes::{AnsiCode, RcCharacterStyles, TerminalCharacter, EMPTY_TERMINAL_CHARACTER};
 use crate::ui::boundaries::boundary_type;
 use crate::ClientId;
 use zellij_utils::data::{client_id_to_colors, PaletteColor, Style};
 use zellij_utils::errors::prelude::*;
-use zellij_utils::pane_size::Viewport;
+use zellij_utils::pane_size::{Offset, Viewport};
+use zellij_utils::position::Position;
 
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 fn foreground_color(characters: &str, color: Option<PaletteColor>) -> Vec<TerminalCharacter> {
-    let mut colored_string = Vec::with_capacity(characters.chars().count());
+    let mut colored_string = Vec::new();
     for character in characters.chars() {
-        let styles = match color {
-            Some(palette_color) => {
-                let mut styles = CharacterStyles::new();
-                styles.reset_all();
-                styles
-                    .foreground(Some(AnsiCode::from(palette_color)))
-                    .bold(Some(AnsiCode::On))
-            },
-            None => {
-                let mut styles = CharacterStyles::new();
-                styles.reset_all();
-                styles.bold(Some(AnsiCode::On))
-            },
-        };
-        let terminal_character = TerminalCharacter {
-            character,
-            styles,
-            width: character.width().unwrap_or(0),
-        };
+        let mut styles = RcCharacterStyles::reset();
+        styles.update(|styles| {
+            styles.bold = Some(AnsiCode::On);
+            match color {
+                Some(palette_color) => {
+                    styles.foreground = Some(AnsiCode::from(palette_color));
+                },
+                None => {},
+            }
+        });
+        let terminal_character = TerminalCharacter::new_styled(character, styles);
         colored_string.push(terminal_character);
     }
     colored_string
 }
 
 fn background_color(characters: &str, color: Option<PaletteColor>) -> Vec<TerminalCharacter> {
-    let mut colored_string = Vec::with_capacity(characters.chars().count());
+    let mut colored_string = Vec::new();
     for character in characters.chars() {
-        let styles = match color {
+        let mut styles = RcCharacterStyles::reset();
+        styles.update(|styles| match color {
             Some(palette_color) => {
-                let mut styles = CharacterStyles::new();
-                styles.reset_all();
-                styles
-                    .background(Some(AnsiCode::from(palette_color)))
-                    .bold(Some(AnsiCode::On))
+                styles.background = Some(AnsiCode::from(palette_color));
+                styles.bold(Some(AnsiCode::On));
             },
-            None => {
-                let mut styles = CharacterStyles::new();
-                styles.reset_all();
-                styles
-            },
-        };
-        let terminal_character = TerminalCharacter {
-            character,
-            styles,
-            width: character.width().unwrap_or(0),
-        };
+            None => {},
+        });
+        let terminal_character = TerminalCharacter::new_styled(character, styles);
         colored_string.push(terminal_character);
     }
     colored_string
@@ -78,6 +61,8 @@ pub struct FrameParams {
     pub pane_is_stacked_under: bool,
     pub pane_is_stacked_over: bool,
     pub should_draw_pane_frames: bool,
+    pub pane_is_floating: bool,
+    pub content_offset: Offset,
 }
 
 #[derive(Default, PartialEq)]
@@ -96,6 +81,9 @@ pub struct PaneFrame {
     pane_is_stacked_over: bool,
     pane_is_stacked_under: bool,
     should_draw_pane_frames: bool,
+    is_pinned: bool,
+    is_floating: bool,
+    content_offset: Offset,
 }
 
 impl PaneFrame {
@@ -120,7 +108,14 @@ impl PaneFrame {
             pane_is_stacked_over: frame_params.pane_is_stacked_over,
             pane_is_stacked_under: frame_params.pane_is_stacked_under,
             should_draw_pane_frames: frame_params.should_draw_pane_frames,
+            is_pinned: false,
+            is_floating: frame_params.pane_is_floating,
+            content_offset: frame_params.content_offset,
         }
+    }
+    pub fn is_pinned(mut self, is_pinned: bool) -> Self {
+        self.is_pinned = is_pinned;
+        self
     }
     pub fn add_exit_status(&mut self, exit_status: Option<i32>) {
         self.exit_status = match exit_status {
@@ -135,7 +130,7 @@ impl PaneFrame {
         self.color = Some(color);
     }
     fn client_cursor(&self, client_id: ClientId) -> Vec<TerminalCharacter> {
-        let color = client_id_to_colors(client_id, self.style.colors);
+        let color = client_id_to_colors(client_id, self.style.colors.multiplayer_user_colors);
         background_color(" ", color.map(|c| c.0))
     }
     fn get_corner(&self, corner: &'static str) -> &'static str {
@@ -167,32 +162,80 @@ impl PaneFrame {
         max_length: usize,
     ) -> Option<(Vec<TerminalCharacter>, usize)> {
         // string and length because of color
-        if self.scroll_position.0 > 0 || self.scroll_position.1 > 0 {
-            let prefix = " SCROLL: ";
-            let full_indication =
-                format!(" {}/{} ", self.scroll_position.0, self.scroll_position.1);
-            let short_indication = format!(" {} ", self.scroll_position.0);
-            let full_indication_len = full_indication.chars().count();
-            let short_indication_len = short_indication.chars().count();
-            let prefix_len = prefix.chars().count();
-            if prefix_len + full_indication_len <= max_length {
-                Some((
-                    foreground_color(&format!("{}{}", prefix, full_indication), self.color),
-                    prefix_len + full_indication_len,
-                ))
-            } else if full_indication_len <= max_length {
-                Some((
-                    foreground_color(&full_indication, self.color),
-                    full_indication_len,
-                ))
-            } else if short_indication_len <= max_length {
-                Some((
-                    foreground_color(&short_indication, self.color),
-                    short_indication_len,
-                ))
+        let has_scroll = self.scroll_position.0 > 0 || self.scroll_position.1 > 0;
+        if has_scroll {
+            let pin_indication = if self.is_floating {
+                self.render_pinned_indication(max_length)
             } else {
                 None
+            }; // no pin indication for tiled panes
+            let space_for_scroll_indication = pin_indication
+                .as_ref()
+                .map(|(_, length)| max_length.saturating_sub(*length + 1))
+                .unwrap_or(max_length);
+            let scroll_indication = self.render_scroll_indication(space_for_scroll_indication);
+            match (pin_indication, scroll_indication) {
+                (
+                    Some((mut pin_indication, pin_indication_len)),
+                    Some((mut scroll_indication, scroll_indication_len)),
+                ) => {
+                    let mut characters: Vec<_> = scroll_indication.drain(..).collect();
+                    let mut separator = foreground_color(&format!("|"), self.color);
+                    characters.append(&mut separator);
+                    characters.append(&mut pin_indication);
+                    Some((characters, pin_indication_len + scroll_indication_len + 1))
+                },
+                (Some(pin_indication), None) => Some(pin_indication),
+                (None, Some(scroll_indication)) => Some(scroll_indication),
+                _ => None,
             }
+        } else if self.is_floating {
+            self.render_pinned_indication(max_length)
+        } else {
+            None
+        }
+    }
+    fn render_scroll_indication(
+        &self,
+        max_length: usize,
+    ) -> Option<(Vec<TerminalCharacter>, usize)> {
+        let prefix = " SCROLL: ";
+        let full_indication = format!(" {}/{} ", self.scroll_position.0, self.scroll_position.1);
+        let short_indication = format!(" {} ", self.scroll_position.0);
+        let full_indication_len = full_indication.chars().count();
+        let short_indication_len = short_indication.chars().count();
+        let prefix_len = prefix.chars().count();
+        if prefix_len + full_indication_len <= max_length {
+            Some((
+                foreground_color(&format!("{}{}", prefix, full_indication), self.color),
+                prefix_len + full_indication_len,
+            ))
+        } else if full_indication_len <= max_length {
+            Some((
+                foreground_color(&full_indication, self.color),
+                full_indication_len,
+            ))
+        } else if short_indication_len <= max_length {
+            Some((
+                foreground_color(&short_indication, self.color),
+                short_indication_len,
+            ))
+        } else {
+            None
+        }
+    }
+    fn render_pinned_indication(
+        &self,
+        max_length: usize,
+    ) -> Option<(Vec<TerminalCharacter>, usize)> {
+        let is_checked = if self.is_pinned { '+' } else { ' ' };
+        let full_indication = format!(" PIN [{}] ", is_checked);
+        let full_indication_len = full_indication.chars().count();
+        if full_indication_len <= max_length {
+            Some((
+                foreground_color(&full_indication, self.color),
+                full_indication_len,
+            ))
         } else {
             None
         }
@@ -367,7 +410,7 @@ impl PaneFrame {
         } else {
             let length_of_each_half = (max_length - middle_truncated_sign.width()) / 2;
 
-            let mut first_part: String = String::with_capacity(length_of_each_half);
+            let mut first_part: String = String::new();
             for char in full_text.chars() {
                 if first_part.width() + char.width().unwrap_or(0) > length_of_each_half {
                     break;
@@ -376,7 +419,7 @@ impl PaneFrame {
                 }
             }
 
-            let mut second_part: String = String::with_capacity(length_of_each_half);
+            let mut second_part: String = String::new();
             for char in full_text.chars().rev() {
                 if second_part.width() + char.width().unwrap_or(0) > length_of_each_half {
                     break;
@@ -712,6 +755,22 @@ impl PaneFrame {
         };
         Ok(res)
     }
+    pub fn clicked_on_pinned(&mut self, position: Position) -> bool {
+        if self.is_floating {
+            // TODO: this is not entirely accurate because our relative position calculation in
+            // itself isn't - when that is fixed, we should adjust this as well
+            let checkbox_center_position = self.geom.cols.saturating_sub(5);
+            let checkbox_position_start = checkbox_center_position.saturating_sub(1);
+            let checkbox_position_end = checkbox_center_position + 1;
+            if position.line() == -1
+                && (position.column() >= checkbox_position_start
+                    && position.column() <= checkbox_position_end)
+            {
+                return true;
+            }
+        }
+        false
+    }
     pub fn render(&self) -> Result<(Vec<CharacterChunk>, Option<String>)> {
         let err_context = || "failed to render pane frame";
         let mut character_chunks = vec![];
@@ -720,11 +779,26 @@ impl PaneFrame {
             // if this is a stacked pane with pane frames off (and it doesn't necessarily have only
             // 1 row because it could also be a flexible stacked pane)
             // in this case we should always draw the pane title line, and only the title line
-            let one_line_title = self.render_one_line_title().with_context(err_context)?;
+            let mut one_line_title = self.render_one_line_title().with_context(err_context)?;
+
+            if self.content_offset.right != 0 && !self.should_draw_pane_frames {
+                // here what happens is that the title should be offset to the right
+                // in order to give room to the boundaries between the panes to be drawn
+                one_line_title.pop();
+            }
+            let y_coords_of_title = if self.pane_is_stacked_under && !self.should_draw_pane_frames {
+                // we only want to use the bottom offset in this case because panes that are
+                // stacked above the flexible pane should actually appear exactly where they are on
+                // screen, the content offset being "absorbed" by the flexible pane below them
+                self.geom.y.saturating_sub(self.content_offset.bottom)
+            } else {
+                self.geom.y
+            };
+
             character_chunks.push(CharacterChunk::new(
                 one_line_title,
                 self.geom.x,
-                self.geom.y,
+                y_coords_of_title,
             ));
         } else {
             for row in 0..self.geom.rows {
@@ -791,9 +865,9 @@ impl PaneFrame {
                 let exited_text = "EXIT CODE: ";
                 let exit_code_text = format!("{}", exit_code);
                 let exit_code_color = if exit_code == 0 {
-                    self.style.colors.green
+                    self.style.colors.exit_code_success.base
                 } else {
-                    self.style.colors.red
+                    self.style.colors.exit_code_error.base
                 };
                 let right_bracket = " ] ";
                 first_part.append(&mut foreground_color(left_bracket, self.color));
@@ -819,7 +893,7 @@ impl PaneFrame {
                 first_part.append(&mut foreground_color(left_bracket, self.color));
                 first_part.append(&mut foreground_color(
                     exited_text,
-                    Some(self.style.colors.red),
+                    Some(self.style.colors.exit_code_error.base),
                 ));
                 first_part.append(&mut foreground_color(right_bracket, self.color));
                 (
@@ -837,25 +911,40 @@ impl PaneFrame {
         let enter_text = "ENTER";
         let right_enter_bracket = ">";
         let enter_tip = if self.is_first_run {
-            " to run, "
+            " run, "
         } else {
-            " to re-run, "
+            " re-run, "
         };
+
+        let left_esc_bracket = "<";
+        let esc_text = "ESC";
+        let right_esc_bracket = ">";
+        let esc_tip = " drop to shell, ";
+
         let left_break_bracket = "<";
         let break_text = "Ctrl-c";
         let right_break_bracket = ">";
-        let break_tip = " to exit ";
+        let break_tip = " exit ";
         second_part.append(&mut foreground_color(left_enter_bracket, self.color));
         second_part.append(&mut foreground_color(
             enter_text,
-            Some(self.style.colors.orange),
+            Some(self.style.colors.text_unselected.emphasis_0),
         ));
         second_part.append(&mut foreground_color(right_enter_bracket, self.color));
         second_part.append(&mut foreground_color(enter_tip, self.color));
+
+        second_part.append(&mut foreground_color(left_esc_bracket, self.color));
+        second_part.append(&mut foreground_color(
+            esc_text,
+            Some(self.style.colors.text_unselected.emphasis_0),
+        ));
+        second_part.append(&mut foreground_color(right_esc_bracket, self.color));
+        second_part.append(&mut foreground_color(esc_tip, self.color));
+
         second_part.append(&mut foreground_color(left_break_bracket, self.color));
         second_part.append(&mut foreground_color(
             break_text,
-            Some(self.style.colors.orange),
+            Some(self.style.colors.text_unselected.emphasis_0),
         ));
         second_part.append(&mut foreground_color(right_break_bracket, self.color));
         second_part.append(&mut foreground_color(break_tip, self.color));
@@ -865,6 +954,10 @@ impl PaneFrame {
                 + enter_text.len()
                 + right_enter_bracket.len()
                 + enter_tip.len()
+                + left_esc_bracket.len()
+                + esc_text.len()
+                + right_esc_bracket.len()
+                + esc_tip.len()
                 + left_break_bracket.len()
                 + break_text.len()
                 + right_break_bracket.len()

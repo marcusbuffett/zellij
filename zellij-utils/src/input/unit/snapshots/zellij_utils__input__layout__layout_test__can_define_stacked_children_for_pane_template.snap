@@ -1,6 +1,6 @@
 ---
 source: zellij-utils/src/input/./unit/layout_test.rs
-assertion_line: 1881
+assertion_line: 1911
 expression: "format!(\"{:#?}\", layout)"
 ---
 Layout {
@@ -32,6 +32,9 @@ Layout {
                                         children_are_stacked: false,
                                         is_expanded_in_stack: false,
                                         exclude_from_sync: None,
+                                        run_instructions_to_ignore: [],
+                                        hide_floating_panes: false,
+                                        pane_initial_contents: None,
                                     },
                                     TiledPaneLayout {
                                         children_split_direction: Horizontal,
@@ -45,6 +48,9 @@ Layout {
                                         children_are_stacked: false,
                                         is_expanded_in_stack: false,
                                         exclude_from_sync: None,
+                                        run_instructions_to_ignore: [],
+                                        hide_floating_panes: false,
+                                        pane_initial_contents: None,
                                     },
                                 ],
                                 split_size: None,
@@ -55,6 +61,9 @@ Layout {
                                 children_are_stacked: true,
                                 is_expanded_in_stack: true,
                                 exclude_from_sync: None,
+                                run_instructions_to_ignore: [],
+                                hide_floating_panes: false,
+                                pane_initial_contents: None,
                             },
                         ],
                         split_size: None,
@@ -65,6 +74,9 @@ Layout {
                         children_are_stacked: true,
                         is_expanded_in_stack: false,
                         exclude_from_sync: None,
+                        run_instructions_to_ignore: [],
+                        hide_floating_panes: false,
+                        pane_initial_contents: None,
                     },
                 ],
                 split_size: None,
@@ -75,6 +87,9 @@ Layout {
                 children_are_stacked: false,
                 is_expanded_in_stack: false,
                 exclude_from_sync: None,
+                run_instructions_to_ignore: [],
+                hide_floating_panes: false,
+                pane_initial_contents: None,
             },
             [],
         ),

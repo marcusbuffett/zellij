@@ -1,5 +1,7 @@
 # This file is updated by `update-toolchain.sh`
 [toolchain]
-channel = "1.67.0"
-components = ["rustfmt", "clippy", "rust-analysis"]
-targets = ["wasm32-wasi", "x86_64-unknown-linux-musl"]
+# NOTE: When updating this, modify `rust-version` in `Cargo.toml` accordingly
+channel = "1.84.0"
+components = ["rustfmt", "clippy"]
+# NOTE: Change this with care, this is also used by the CI pipeline
+targets = ["wasm32-wasip1", "x86_64-unknown-linux-musl"]

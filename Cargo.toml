@@ -1,6 +1,6 @@
 [package]
 name = "zellij"
-version = "0.37.0"
+version = "0.43.0"
 authors = ["Aram Drevekenin <aram@poor.dev>"]
 edition = "2021"
 description = "A terminal workspace with batteries included"
@@ -8,14 +8,15 @@ license = "MIT"
 repository = "https://github.com/zellij-org/zellij"
 homepage = "https://zellij.dev"
 include = ["src/**/*", "assets/layouts/*", "assets/config/*", "LICENSE.md", "README.md", "!**/*_test.*", "!**/tests/**/*"]
-rust-version = "1.60"
+# NOTE: When updating this, modify `channel` in `rust-toolchain.toml` accordingly
+rust-version = "1.84"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-zellij-client = { path = "zellij-client/", version = "0.37.0" }
-zellij-server = { path = "zellij-server/", version = "0.37.0" }
-zellij-utils = { path = "zellij-utils/", version = "0.37.0" }
+zellij-client = { path = "zellij-client/", version = "0.43.0" }
+zellij-server = { path = "zellij-server/", version = "0.43.0" }
+zellij-utils = { path = "zellij-utils/", version = "0.43.0" }
 thiserror = "1.0.40"
 names = { version = "0.14.0", default-features = false }
 log = "0.4.17"
@@ -34,6 +35,11 @@ members = [
     "default-plugins/status-bar",
     "default-plugins/strider",
     "default-plugins/tab-bar",
+    "default-plugins/fixture-plugin-for-tests",
+    "default-plugins/session-manager",
+    "default-plugins/configuration",
+    "default-plugins/plugin-manager",
+    "default-plugins/about",
     "zellij-client",
     "zellij-server",
     "zellij-utils",
@@ -75,10 +81,12 @@ pkg-fmt = "tgz"
 
 [features]
 # See remarks in zellij_utils/Cargo.toml
-default = [ "zellij-utils/plugins_from_target" ]
-disable_automatic_asset_installation = [ "zellij-utils/disable_automatic_asset_installation" ]
-unstable = [ "zellij-client/unstable", "zellij-utils/unstable" ]
-singlepass = [ "zellij-server/singlepass" ]
+default = ["plugins_from_target", "vendored_curl"]
+plugins_from_target = ["zellij-utils/plugins_from_target"]
+disable_automatic_asset_installation = ["zellij-utils/disable_automatic_asset_installation"]
+vendored_curl = ["zellij-utils/vendored_curl"]
+unstable = ["zellij-client/unstable", "zellij-utils/unstable"]
+singlepass = ["zellij-server/singlepass"]
 
 # uncomment this when developing plugins in the Zellij UI to make plugin compilation faster
 # [profile.dev.package."*"]

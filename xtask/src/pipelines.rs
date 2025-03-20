@@ -179,6 +179,13 @@ pub fn dist(sh: &Shell, _flags: flags::Dist) -> anyhow::Result<()> {
         .with_context(err_context)
 }
 
+/// Actions for the user to choose from to resolve publishing errors/conflicts.
+enum UserAction {
+    Retry,
+    Abort,
+    Ignore,
+}
+
 /// Make a zellij release and publish all crates.
 pub fn publish(sh: &Shell, flags: flags::Publish) -> anyhow::Result<()> {
     let err_context = "failed to publish zellij";
@@ -190,10 +197,11 @@ pub fn publish(sh: &Shell, flags: flags::Publish) -> anyhow::Result<()> {
         None
     };
     let remote = flags.git_remote.unwrap_or("origin".into());
-    let registry = if let Some(registry) = flags.cargo_registry {
+    let registry = if let Some(ref registry) = flags.cargo_registry {
         Some(format!(
             "--registry={}",
             registry
+                .clone()
                 .into_string()
                 .map_err(|registry| anyhow::Error::msg(format!(
                     "failed to convert '{:?}' to valid registry name",
@@ -205,6 +213,9 @@ pub fn publish(sh: &Shell, flags: flags::Publish) -> anyhow::Result<()> {
         None
     };
     let registry = registry.as_ref();
+    if flags.no_push && flags.cargo_registry.is_none() {
+        anyhow::bail!("flag '--no-push' can only be used with '--cargo-registry'");
+    }
 
     sh.change_dir(crate::project_root());
     let cargo = crate::cargo().context(err_context)?;
@@ -297,6 +308,8 @@ pub fn publish(sh: &Shell, flags: flags::Publish) -> anyhow::Result<()> {
         // Push commit and tag
         if flags.dry_run {
             println!("Skipping push due to dry-run");
+        } else if flags.no_push {
+            println!("Skipping push due to no-push");
         } else {
             cmd!(sh, "git push --atomic {remote} main v{version}")
                 .run()
@@ -304,7 +317,7 @@ pub fn publish(sh: &Shell, flags: flags::Publish) -> anyhow::Result<()> {
         }
 
         // Publish all the crates
-        for WorkspaceMember { crate_name, .. } in crate::WORKSPACE_MEMBERS.iter() {
+        for WorkspaceMember { crate_name, .. } in crate::workspace_members().iter() {
             if crate_name.contains("plugin") || crate_name.contains("xtask") {
                 continue;
             }
@@ -324,7 +337,7 @@ pub fn publish(sh: &Shell, flags: flags::Publish) -> anyhow::Result<()> {
 
                 if let Err(err) = cmd!(
                     sh,
-                    "{cargo} publish {registry...} {more_args...} {dry_run...}"
+                    "{cargo} publish --locked {registry...} {more_args...} {dry_run...}"
                 )
                 .run()
                 .context(err_context)
@@ -333,38 +346,46 @@ pub fn publish(sh: &Shell, flags: flags::Publish) -> anyhow::Result<()> {
                     println!("Publishing crate '{crate_name}' failed with error:");
                     println!("{:?}", err);
                     println!();
-                    println!("Retry? [y/n]");
+                    println!("Please choose what to do: [r]etry/[a]bort/[i]gnore");
 
                     let stdin = std::io::stdin();
-                    let mut buffer = String::new();
-                    let retry: bool;
+                    let action;
 
                     loop {
+                        let mut buffer = String::new();
                         stdin.read_line(&mut buffer).context(err_context)?;
-
                         match buffer.trim_end() {
-                            "y" | "Y" => {
-                                retry = true;
+                            "r" | "R" => {
+                                action = UserAction::Retry;
                                 break;
                             },
-                            "n" | "N" => {
-                                retry = false;
+                            "a" | "A" => {
+                                action = UserAction::Abort;
+                                break;
+                            },
+                            "i" | "I" => {
+                                action = UserAction::Ignore;
                                 break;
                             },
                             _ => {
                                 println!(" --> Unknown input '{buffer}', ignoring...");
                                 println!();
-                                println!("Retry? [y/n]");
+                                println!("Please choose what to do: [r]etry/[a]bort/[i]gnore");
                             },
                         }
                     }
 
-                    if retry {
-                        continue;
-                    } else {
-                        println!("Aborting publish for crate '{crate_name}'");
-                        return Err::<(), _>(err);
+                    match action {
+                        UserAction::Retry => continue,
+                        UserAction::Ignore => break,
+                        UserAction::Abort => {
+                            eprintln!("Aborting publish for crate '{crate_name}'");
+                            return Err::<(), _>(err);
+                        },
                     }
+                } else {
+                    // publish successful, continue to next crate
+                    break;
                 }
             }
         }
@@ -380,7 +401,7 @@ pub fn publish(sh: &Shell, flags: flags::Publish) -> anyhow::Result<()> {
     // program. When dry-running we need to undo the release commit first!
     let result = closure();
 
-    if flags.dry_run {
+    if flags.dry_run && !skip_build {
         cmd!(sh, "git reset --hard HEAD~1")
             .run()
             .context(err_context)?;

@@ -1,7 +1,7 @@
 use std::fmt::{Display, Error, Formatter};
 
 use zellij_utils::{
-    data::{Palette, PaletteColor},
+    data::{PaletteColor, Styling},
     errors::prelude::*,
 };
 
@@ -24,7 +24,8 @@ pub struct LoadingIndication {
     error: Option<String>,
     animation_offset: usize,
     plugin_name: String,
-    terminal_emulator_colors: Option<Palette>,
+    terminal_emulator_colors: Option<Styling>,
+    override_previous_error: bool,
 }
 
 impl LoadingIndication {
@@ -38,16 +39,25 @@ impl LoadingIndication {
     pub fn set_name(&mut self, plugin_name: String) {
         self.plugin_name = plugin_name;
     }
-    pub fn with_colors(mut self, terminal_emulator_colors: Palette) -> Self {
+    pub fn with_colors(mut self, terminal_emulator_colors: Styling) -> Self {
         self.terminal_emulator_colors = Some(terminal_emulator_colors);
         self
     }
     pub fn merge(&mut self, other: LoadingIndication) {
         let current_animation_offset = self.animation_offset;
         let current_terminal_emulator_colors = self.terminal_emulator_colors.take();
+        let mut current_error = self.error.take();
+        let override_previous_error = other.override_previous_error;
         drop(std::mem::replace(self, other));
         self.animation_offset = current_animation_offset;
         self.terminal_emulator_colors = current_terminal_emulator_colors;
+        if let Some(current_error) = current_error.take() {
+            // we do this so that only the first error (usually the root cause) will be shown
+            // when plugins support scrolling, we might want to do an append here
+            if !override_previous_error {
+                self.error = Some(current_error);
+            }
+        }
     }
     pub fn indicate_loading_plugin_from_memory(&mut self) {
         self.loading_from_memory = Some(LoadingStatus::InProgress);
@@ -104,6 +114,12 @@ impl LoadingIndication {
     pub fn indicate_loading_error(&mut self, error_text: String) {
         self.error = Some(error_text);
     }
+    pub fn is_error(&self) -> bool {
+        self.error.is_some()
+    }
+    pub fn override_previous_error(&mut self) {
+        self.override_previous_error = true;
+    }
     fn started_loading(&self) -> bool {
         self.loading_from_memory.is_some()
             || self.loading_from_hd_cache.is_some()
@@ -126,19 +142,27 @@ macro_rules! style {
 impl Display for LoadingIndication {
     fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
         let cyan = match self.terminal_emulator_colors {
-            Some(terminal_emulator_colors) => style!(terminal_emulator_colors.cyan).bold(),
+            Some(terminal_emulator_colors) => {
+                style!(terminal_emulator_colors.exit_code_success.emphasis_0).bold()
+            },
             None => ansi_term::Style::new(),
         };
         let green = match self.terminal_emulator_colors {
-            Some(terminal_emulator_colors) => style!(terminal_emulator_colors.green).bold(),
+            Some(terminal_emulator_colors) => {
+                style!(terminal_emulator_colors.exit_code_success.base).bold()
+            },
             None => ansi_term::Style::new(),
         };
         let yellow = match self.terminal_emulator_colors {
-            Some(terminal_emulator_colors) => style!(terminal_emulator_colors.yellow).bold(),
+            Some(terminal_emulator_colors) => {
+                style!(terminal_emulator_colors.exit_code_error.emphasis_0).bold()
+            },
             None => ansi_term::Style::new(),
         };
         let red = match self.terminal_emulator_colors {
-            Some(terminal_emulator_colors) => style!(terminal_emulator_colors.red).bold(),
+            Some(terminal_emulator_colors) => {
+                style!(terminal_emulator_colors.exit_code_error.base).bold()
+            },
             None => ansi_term::Style::new(),
         };
         let bold = ansi_term::Style::new().bold().italic();
@@ -256,7 +280,18 @@ impl Display for LoadingIndication {
             None => {},
         }
         if let Some(error_text) = &self.error {
-            stringified.push_str(&format!("\n\r{} {error_text}", red.bold().paint("ERROR:")));
+            stringified.push_str(&format!(
+                "\n\r{} {}",
+                red.bold().paint("ERROR: "),
+                error_text.replace('\n', "\n\r")
+            ));
+            // we add this additional line explicitly to make it easier to realize when something
+            // is wrong in very small plugins (eg. the tab-bar and status-bar)
+            stringified.push_str(&format!(
+                "\n\r{}",
+                red.bold()
+                    .paint("ERROR IN PLUGIN - check logs for more info")
+            ));
         }
         write!(f, "{}", stringified)
     }

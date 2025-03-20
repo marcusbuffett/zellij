@@ -1,6 +1,6 @@
 ---
 source: zellij-utils/src/input/./unit/layout_test.rs
-assertion_line: 1305
+assertion_line: 1393
 expression: "format!(\"{:#?}\", layout)"
 ---
 Layout {
@@ -25,6 +25,7 @@ Layout {
                                     cwd: None,
                                     hold_on_close: true,
                                     hold_on_start: false,
+                                    originating_plugin: None,
                                 },
                             ),
                         ),
@@ -34,6 +35,9 @@ Layout {
                         children_are_stacked: false,
                         is_expanded_in_stack: false,
                         exclude_from_sync: None,
+                        run_instructions_to_ignore: [],
+                        hide_floating_panes: false,
+                        pane_initial_contents: None,
                     },
                     TiledPaneLayout {
                         children_split_direction: Horizontal,
@@ -48,6 +52,7 @@ Layout {
                                     cwd: None,
                                     hold_on_close: false,
                                     hold_on_start: false,
+                                    originating_plugin: None,
                                 },
                             ),
                         ),
@@ -57,6 +62,9 @@ Layout {
                         children_are_stacked: false,
                         is_expanded_in_stack: false,
                         exclude_from_sync: None,
+                        run_instructions_to_ignore: [],
+                        hide_floating_panes: false,
+                        pane_initial_contents: None,
                     },
                 ],
                 split_size: None,
@@ -67,6 +75,9 @@ Layout {
                 children_are_stacked: false,
                 is_expanded_in_stack: false,
                 exclude_from_sync: None,
+                run_instructions_to_ignore: [],
+                hide_floating_panes: false,
+                pane_initial_contents: None,
             },
             [],
         ),

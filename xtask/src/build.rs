@@ -22,7 +22,7 @@ pub fn build(sh: &Shell, flags: flags::Build) -> anyhow::Result<()> {
         std::process::exit(1);
     }
 
-    for WorkspaceMember { crate_name, .. } in crate::WORKSPACE_MEMBERS
+    for WorkspaceMember { crate_name, .. } in crate::workspace_members()
         .iter()
         .filter(|member| member.build)
     {
@@ -32,9 +32,55 @@ pub fn build(sh: &Shell, flags: flags::Build) -> anyhow::Result<()> {
             if flags.no_plugins {
                 continue;
             }
-        } else {
-            if flags.plugins_only {
-                continue;
+        } else if flags.plugins_only {
+            continue;
+        }
+
+        // zellij-utils requires protobuf definition files to be present. Usually these are
+        // auto-generated with `build.rs`-files, but this is currently broken for us.
+        // See [this PR][1] for details.
+        //
+        // [1]: https://github.com/zellij-org/zellij/pull/2711#issuecomment-1695015818
+        {
+            let zellij_utils_basedir = crate::project_root().join("zellij-utils");
+            let _pd = sh.push_dir(zellij_utils_basedir);
+
+            let prost_asset_dir = sh.current_dir().join("assets").join("prost");
+            let protobuf_source_dir = sh.current_dir().join("src").join("plugin_api");
+            std::fs::create_dir_all(&prost_asset_dir).unwrap();
+
+            let mut prost = prost_build::Config::new();
+            let last_generated = prost_asset_dir
+                .join("generated_plugin_api.rs")
+                .metadata()
+                .and_then(|m| m.modified());
+            let mut needs_regeneration = false;
+            prost.out_dir(prost_asset_dir);
+            prost.include_file("generated_plugin_api.rs");
+            let mut proto_files = vec![];
+            for entry in std::fs::read_dir(&protobuf_source_dir).unwrap() {
+                let entry_path = entry.unwrap().path();
+                if entry_path.is_file() {
+                    if !entry_path
+                        .extension()
+                        .map(|e| e == "proto")
+                        .unwrap_or(false)
+                    {
+                        continue;
+                    }
+                    proto_files.push(entry_path.display().to_string());
+                    let modified = entry_path.metadata().and_then(|m| m.modified());
+                    needs_regeneration |= match (&last_generated, modified) {
+                        (Ok(last_generated), Ok(modified)) => modified >= *last_generated,
+                        // Couldn't read some metadata, assume needs update
+                        _ => true,
+                    }
+                }
+            }
+            if needs_regeneration {
+                prost
+                    .compile_protos(&proto_files, &[protobuf_source_dir])
+                    .unwrap();
             }
         }
 
@@ -79,7 +125,7 @@ fn move_plugin_to_assets(sh: &Shell, plugin_name: &str) -> anyhow::Result<()> {
         std::env::var_os("CARGO_TARGET_DIR")
             .unwrap_or(crate::project_root().join("target").into_os_string()),
     )
-    .join("wasm32-wasi")
+    .join("wasm32-wasip1")
     .join("release")
     .join(plugin_name)
     .with_extension("wasm");
@@ -105,7 +151,7 @@ pub fn manpage(sh: &Shell) -> anyhow::Result<()> {
 
     let project_root = crate::project_root();
     let asset_dir = &project_root.join("assets").join("man");
-    sh.create_dir(&asset_dir).context(err_context)?;
+    sh.create_dir(asset_dir).context(err_context)?;
     let _pd = sh.push_dir(asset_dir);
 
     cmd!(sh, "{mandown} {project_root}/docs/MANPAGE.md 1")

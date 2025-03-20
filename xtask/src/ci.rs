@@ -4,7 +4,10 @@ use crate::{
     flags::{self, CiCmd, Cross, E2e},
 };
 use anyhow::Context;
-use std::{ffi::OsString, path::PathBuf};
+use std::{
+    ffi::OsString,
+    path::{Path, PathBuf},
+};
 use xshell::{cmd, Shell};
 
 pub fn main(sh: &Shell, flags: flags::Ci) -> anyhow::Result<()> {
@@ -74,7 +77,7 @@ fn e2e_build(sh: &Shell) -> anyhow::Result<()> {
 
     sh.remove_path(&data_dir)
         .and_then(|_| sh.create_dir(&data_dir))
-        .and_then(|_| sh.create_dir(&data_dir.join("plugins")))
+        .and_then(|_| sh.create_dir(data_dir.join("plugins")))
         .context(err_context)?;
 
     for plugin in plugins {
@@ -105,13 +108,27 @@ fn e2e_test(sh: &Shell, args: Vec<OsString>) -> anyhow::Result<()> {
     // set --no-default-features so the test binary gets built with the plugins from assets/plugins that just got built
     crate::cargo()
         .and_then(|cargo| {
+            // e2e tests
             cmd!(
                 sh,
                 "{cargo} test --no-default-features -- --ignored --nocapture --test-threads 1"
             )
-            .args(args)
+            .args(args.clone())
             .run()
-            .map_err(anyhow::Error::new)
+            .map_err(anyhow::Error::new)?;
+
+            // plugin system tests are run here because they're medium-slow
+            let _pd = sh.push_dir(Path::new("zellij-server"));
+            println!();
+            let msg = ">> Testing Plugin System".to_string();
+            crate::status(&msg);
+            println!("{}", msg);
+
+            cmd!(sh, "{cargo} test -- --ignored --nocapture --test-threads 1")
+                .args(args.clone())
+                .run()
+                .with_context(|| "Failed to run tests for the Plugin System".to_string())?;
+            Ok(())
         })
         .context(err_context)
 }

@@ -9,6 +9,12 @@ pub struct ActivePanes {
     os_api: Box<dyn ServerOsApi>,
 }
 
+impl std::fmt::Debug for ActivePanes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.active_panes)
+    }
+}
+
 impl ActivePanes {
     pub fn new(os_api: &Box<dyn ServerOsApi>) -> Self {
         let os_api = os_api.clone();
@@ -97,5 +103,11 @@ impl ActivePanes {
                     .write_to_tty_stdin(terminal_id, focus_event.as_bytes());
             }
         }
+    }
+    pub fn pane_id_is_focused(&self, pane_id: &PaneId) -> bool {
+        self.active_panes
+            .values()
+            .find(|p_id| **p_id == *pane_id)
+            .is_some()
     }
 }

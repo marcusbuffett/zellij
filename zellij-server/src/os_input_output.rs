@@ -10,6 +10,7 @@ use nix::{
     },
     unistd,
 };
+
 use signal_hook::consts::*;
 use sysinfo::{ProcessExt, ProcessRefreshKind, System, SystemExt};
 use zellij_utils::{
@@ -30,7 +31,7 @@ use zellij_utils::{
 };
 
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
     env,
     fs::File,
     io::Write,
@@ -182,6 +183,7 @@ fn handle_openpty(
             }
             command
                 .args(&cmd.args)
+                .env("ZELLIJ_PANE_ID", &format!("{}", terminal_id))
                 .pre_exec(move || -> std::io::Result<()> {
                     if libc::login_tty(pid_secondary) != 0 {
                         panic!("failed to set controlling terminal");
@@ -219,7 +221,7 @@ fn handle_openpty(
 fn handle_terminal(
     cmd: RunCommand,
     failover_cmd: Option<RunCommand>,
-    orig_termios: termios::Termios,
+    orig_termios: Option<termios::Termios>,
     quit_cb: Box<dyn Fn(PaneId, Option<i32>, RunCommand) + Send>,
     terminal_id: u32,
 ) -> Result<(RawFd, RawFd)> {
@@ -227,7 +229,7 @@ fn handle_terminal(
 
     // Create a pipe to allow the child the communicate the shell's pid to its
     // parent.
-    match openpty(None, Some(&orig_termios)) {
+    match openpty(None, &orig_termios) {
         Ok(open_pty_res) => handle_openpty(open_pty_res, cmd, quit_cb, terminal_id),
         Err(e) => match failover_cmd {
             Some(failover_cmd) => {
@@ -277,7 +279,7 @@ fn separate_command_arguments(command: &mut PathBuf, args: &mut Vec<String>) {
 /// set.
 fn spawn_terminal(
     terminal_action: TerminalAction,
-    orig_termios: termios::Termios,
+    orig_termios: Option<termios::Termios>,
     quit_cb: Box<dyn Fn(PaneId, Option<i32>, RunCommand) + Send>, // u32 is the exit_status
     default_editor: Option<PathBuf>,
     terminal_id: u32,
@@ -286,10 +288,10 @@ fn spawn_terminal(
     // secondary fd
     let mut failover_cmd_args = None;
     let cmd = match terminal_action {
-        TerminalAction::OpenFile(mut file_to_open, line_number, cwd) => {
-            if file_to_open.is_relative() {
-                if let Some(cwd) = cwd.as_ref() {
-                    file_to_open = cwd.join(file_to_open);
+        TerminalAction::OpenFile(mut payload) => {
+            if payload.path.is_relative() {
+                if let Some(cwd) = payload.cwd.as_ref() {
+                    payload.path = cwd.join(payload.path);
                 }
             }
             let mut command = default_editor.unwrap_or_else(|| {
@@ -304,11 +306,12 @@ fn spawn_terminal(
             if !command.is_dir() {
                 separate_command_arguments(&mut command, &mut args);
             }
-            let file_to_open = file_to_open
+            let file_to_open = payload
+                .path
                 .into_os_string()
                 .into_string()
                 .expect("Not valid Utf8 Encoding");
-            if let Some(line_number) = line_number {
+            if let Some(line_number) = payload.line_number {
                 if command.ends_with("vim")
                     || command.ends_with("nvim")
                     || command.ends_with("emacs")
@@ -332,9 +335,10 @@ fn spawn_terminal(
             RunCommand {
                 command,
                 args,
-                cwd,
+                cwd: payload.cwd,
                 hold_on_close: false,
                 hold_on_start: false,
+                ..Default::default()
             }
         },
         TerminalAction::RunCommand(command) => command,
@@ -383,7 +387,6 @@ impl ClientSender {
             for msg in client_buffer_receiver.iter() {
                 sender.send(msg).with_context(err_context).non_fatal();
             }
-            // If we're here, the message buffer is broken for some reason
             let _ = sender.send(ServerToClientMsg::Exit(ExitReason::Disconnect));
         });
         ClientSender {
@@ -416,7 +419,7 @@ impl ClientSender {
 
 #[derive(Clone)]
 pub struct ServerOsInputOutput {
-    orig_termios: Arc<Mutex<termios::Termios>>,
+    orig_termios: Arc<Mutex<Option<termios::Termios>>>,
     client_senders: Arc<Mutex<HashMap<ClientId, ClientSender>>>,
     terminal_id_to_raw_fd: Arc<Mutex<BTreeMap<u32, Option<RawFd>>>>, // A value of None means the
     // terminal_id exists but is
@@ -441,7 +444,7 @@ struct RawFdAsyncReader {
 impl RawFdAsyncReader {
     fn new(fd: RawFd) -> RawFdAsyncReader {
         RawFdAsyncReader {
-            /// The supplied `RawFd` is consumed by the created `RawFdAsyncReader`, closing it when dropped
+            // The supplied `RawFd` is consumed by the created `RawFdAsyncReader`, closing it when dropped
             fd: unsafe { AsyncFile::from_raw_fd(fd) },
         }
     }
@@ -502,6 +505,14 @@ pub trait ServerOsApi: Send + Sync {
     fn load_palette(&self) -> Palette;
     /// Returns the current working directory for a given pid
     fn get_cwd(&self, pid: Pid) -> Option<PathBuf>;
+    /// Returns the current working directory for multiple pids
+    fn get_cwds(&self, _pids: Vec<Pid>) -> HashMap<Pid, PathBuf> {
+        HashMap::new()
+    }
+    /// Get a list of all running commands by their parent process id
+    fn get_all_cmds_by_ppid(&self) -> HashMap<String, Vec<String>> {
+        HashMap::new()
+    }
     /// Writes the given buffer to a string
     fn write_to_file(&mut self, buf: String, file: Option<String>) -> Result<()>;
 
@@ -556,6 +567,7 @@ impl ServerOsApi for ServerOsInputOutput {
         }
         Ok(())
     }
+    #[allow(unused_assignments)]
     fn spawn_terminal(
         &self,
         terminal_action: TerminalAction,
@@ -569,24 +581,17 @@ impl ServerOsApi for ServerOsInputOutput {
             .lock()
             .to_anyhow()
             .with_context(err_context)?;
-        let mut terminal_id = None;
-        {
-            let current_ids: HashSet<u32> = self
-                .terminal_id_to_raw_fd
-                .lock()
-                .to_anyhow()
-                .with_context(err_context)?
-                .keys()
-                .copied()
-                .collect();
-            for i in 0..u32::MAX {
-                let i = i as u32;
-                if !current_ids.contains(&i) {
-                    terminal_id = Some(i);
-                    break;
-                }
-            }
-        }
+        let terminal_id = self
+            .terminal_id_to_raw_fd
+            .lock()
+            .to_anyhow()
+            .with_context(err_context)?
+            .keys()
+            .copied()
+            .collect::<BTreeSet<u32>>()
+            .last()
+            .map(|l| l + 1)
+            .or(Some(0));
         match terminal_id {
             Some(terminal_id) => {
                 self.terminal_id_to_raw_fd
@@ -613,27 +618,21 @@ impl ServerOsApi for ServerOsInputOutput {
             None => Err(anyhow!("no more terminal IDs left to allocate")),
         }
     }
+    #[allow(unused_assignments)]
     fn reserve_terminal_id(&self) -> Result<u32> {
         let err_context = || "failed to reserve a terminal ID".to_string();
 
-        let mut terminal_id = None;
-        {
-            let current_ids: HashSet<u32> = self
-                .terminal_id_to_raw_fd
-                .lock()
-                .to_anyhow()
-                .with_context(err_context)?
-                .keys()
-                .copied()
-                .collect();
-            for i in 0..u32::MAX {
-                let i = i as u32;
-                if !current_ids.contains(&i) {
-                    terminal_id = Some(i);
-                    break;
-                }
-            }
-        }
+        let terminal_id = self
+            .terminal_id_to_raw_fd
+            .lock()
+            .to_anyhow()
+            .with_context(err_context)?
+            .keys()
+            .copied()
+            .collect::<BTreeSet<u32>>()
+            .last()
+            .map(|l| l + 1)
+            .or(Some(0));
         match terminal_id {
             Some(terminal_id) => {
                 self.terminal_id_to_raw_fd
@@ -742,7 +741,7 @@ impl ServerOsApi for ServerOsInputOutput {
         let mut system_info = System::new();
         // Update by minimizing information.
         // See https://docs.rs/sysinfo/0.22.5/sysinfo/struct.ProcessRefreshKind.html#
-        system_info.refresh_processes_specifics(ProcessRefreshKind::default());
+        system_info.refresh_process_specifics(pid.into(), ProcessRefreshKind::default());
 
         if let Some(process) = system_info.process(pid.into()) {
             let cwd = process.cwd();
@@ -752,6 +751,54 @@ impl ServerOsApi for ServerOsInputOutput {
             }
         }
         None
+    }
+
+    fn get_cwds(&self, pids: Vec<Pid>) -> HashMap<Pid, PathBuf> {
+        let mut system_info = System::new();
+        let mut cwds = HashMap::new();
+
+        for pid in pids {
+            // Update by minimizing information.
+            // See https://docs.rs/sysinfo/0.22.5/sysinfo/struct.ProcessRefreshKind.html#
+            let is_found =
+                system_info.refresh_process_specifics(pid.into(), ProcessRefreshKind::default());
+            if is_found {
+                if let Some(process) = system_info.process(pid.into()) {
+                    let cwd = process.cwd();
+                    let cwd_is_empty = cwd.iter().next().is_none();
+                    if !cwd_is_empty {
+                        cwds.insert(pid, process.cwd().to_path_buf());
+                    }
+                }
+            }
+        }
+
+        cwds
+    }
+    fn get_all_cmds_by_ppid(&self) -> HashMap<String, Vec<String>> {
+        // the key is the stringified ppid
+        let mut cmds = HashMap::new();
+        if let Some(output) = Command::new("ps")
+            .args(vec!["-ao", "ppid,args"])
+            .output()
+            .ok()
+        {
+            let output = String::from_utf8(output.stdout.clone())
+                .unwrap_or_else(|_| String::from_utf8_lossy(&output.stdout).to_string());
+            for line in output.lines() {
+                let line_parts: Vec<String> = line
+                    .trim()
+                    .split_ascii_whitespace()
+                    .map(|p| p.to_owned())
+                    .collect();
+                let mut line_parts = line_parts.into_iter();
+                let ppid = line_parts.next();
+                if let Some(ppid) = ppid {
+                    cmds.insert(ppid.into(), line_parts.collect());
+                }
+            }
+        }
+        cmds
     }
 
     fn write_to_file(&mut self, buf: String, name: Option<String>) -> Result<()> {
@@ -830,7 +877,10 @@ impl Clone for Box<dyn ServerOsApi> {
 }
 
 pub fn get_server_os_input() -> Result<ServerOsInputOutput, nix::Error> {
-    let current_termios = termios::tcgetattr(0)?;
+    let current_termios = termios::tcgetattr(0).ok();
+    if current_termios.is_none() {
+        log::warn!("Starting a server without a controlling terminal, using the default termios configuration.");
+    }
     let orig_termios = Arc::new(Mutex::new(current_termios));
     Ok(ServerOsInputOutput {
         orig_termios,
@@ -838,6 +888,34 @@ pub fn get_server_os_input() -> Result<ServerOsInputOutput, nix::Error> {
         terminal_id_to_raw_fd: Arc::new(Mutex::new(BTreeMap::new())),
         cached_resizes: Arc::new(Mutex::new(None)),
     })
+}
+
+use crate::pty_writer::PtyWriteInstruction;
+use crate::thread_bus::ThreadSenders;
+
+pub struct ResizeCache {
+    senders: ThreadSenders,
+}
+
+impl ResizeCache {
+    pub fn new(senders: ThreadSenders) -> Self {
+        senders
+            .send_to_pty_writer(PtyWriteInstruction::StartCachingResizes)
+            .unwrap_or_else(|e| {
+                log::error!("Failed to cache resizes: {}", e);
+            });
+        ResizeCache { senders }
+    }
+}
+
+impl Drop for ResizeCache {
+    fn drop(&mut self) {
+        self.senders
+            .send_to_pty_writer(PtyWriteInstruction::ApplyCachedResizes)
+            .unwrap_or_else(|e| {
+                log::error!("Failed to apply cached resizes: {}", e);
+            });
+    }
 }
 
 /// Process id's for forked terminals

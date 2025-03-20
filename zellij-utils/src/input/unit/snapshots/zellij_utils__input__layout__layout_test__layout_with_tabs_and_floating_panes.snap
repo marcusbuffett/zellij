@@ -1,6 +1,6 @@
 ---
 source: zellij-utils/src/input/./unit/layout_test.rs
-assertion_line: 275
+assertion_line: 305
 expression: "format!(\"{:#?}\", layout)"
 ---
 Layout {
@@ -23,6 +23,9 @@ Layout {
                         children_are_stacked: false,
                         is_expanded_in_stack: false,
                         exclude_from_sync: None,
+                        run_instructions_to_ignore: [],
+                        hide_floating_panes: false,
+                        pane_initial_contents: None,
                     },
                 ],
                 split_size: None,
@@ -33,6 +36,9 @@ Layout {
                 children_are_stacked: false,
                 is_expanded_in_stack: false,
                 exclude_from_sync: None,
+                run_instructions_to_ignore: [],
+                hide_floating_panes: false,
+                pane_initial_contents: None,
             },
             [
                 FloatingPaneLayout {
@@ -41,8 +47,12 @@ Layout {
                     width: None,
                     x: None,
                     y: None,
+                    pinned: None,
                     run: None,
                     focus: None,
+                    already_running: false,
+                    pane_initial_contents: None,
+                    logical_position: None,
                 },
             ],
         ),
@@ -64,6 +74,9 @@ Layout {
                         children_are_stacked: false,
                         is_expanded_in_stack: false,
                         exclude_from_sync: None,
+                        run_instructions_to_ignore: [],
+                        hide_floating_panes: false,
+                        pane_initial_contents: None,
                     },
                 ],
                 split_size: None,
@@ -74,6 +87,9 @@ Layout {
                 children_are_stacked: false,
                 is_expanded_in_stack: false,
                 exclude_from_sync: None,
+                run_instructions_to_ignore: [],
+                hide_floating_panes: false,
+                pane_initial_contents: None,
             },
             [
                 FloatingPaneLayout {
@@ -82,8 +98,12 @@ Layout {
                     width: None,
                     x: None,
                     y: None,
+                    pinned: None,
                     run: None,
                     focus: None,
+                    already_running: false,
+                    pane_initial_contents: None,
+                    logical_position: None,
                 },
                 FloatingPaneLayout {
                     name: None,
@@ -91,8 +111,12 @@ Layout {
                     width: None,
                     x: None,
                     y: None,
+                    pinned: None,
                     run: None,
                     focus: None,
+                    already_running: false,
+                    pane_initial_contents: None,
+                    logical_position: None,
                 },
             ],
         ),
@@ -112,6 +136,9 @@ Layout {
                 children_are_stacked: false,
                 is_expanded_in_stack: false,
                 exclude_from_sync: None,
+                run_instructions_to_ignore: [],
+                hide_floating_panes: false,
+                pane_initial_contents: None,
             },
             [],
         ),
