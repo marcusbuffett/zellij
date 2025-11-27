@@ -37,7 +37,7 @@ pub struct FloatingPanes {
     display_area: Rc<RefCell<Size>>,
     viewport: Rc<RefCell<Viewport>>,
     connected_clients: Rc<RefCell<HashSet<ClientId>>>,
-    connected_clients_in_app: Rc<RefCell<HashSet<ClientId>>>,
+    connected_clients_in_app: Rc<RefCell<HashMap<ClientId, bool>>>, // bool -> is_web_client
     mode_info: Rc<RefCell<HashMap<ClientId, ModeInfo>>>,
     character_cell_size: Rc<RefCell<Option<SizeInPixels>>>,
     default_mode_info: ModeInfo,
@@ -49,6 +49,7 @@ pub struct FloatingPanes {
     show_panes: bool,
     pane_being_moved_with_mouse: Option<(PaneId, Position)>,
     senders: ThreadSenders,
+    window_title: Option<String>,
 }
 
 #[allow(clippy::borrowed_box)]
@@ -58,7 +59,7 @@ impl FloatingPanes {
         display_area: Rc<RefCell<Size>>,
         viewport: Rc<RefCell<Viewport>>,
         connected_clients: Rc<RefCell<HashSet<ClientId>>>,
-        connected_clients_in_app: Rc<RefCell<HashSet<ClientId>>>,
+        connected_clients_in_app: Rc<RefCell<HashMap<ClientId, bool>>>, // bool -> is_web_client
         mode_info: Rc<RefCell<HashMap<ClientId, ModeInfo>>>,
         character_cell_size: Rc<RefCell<Option<SizeInPixels>>>,
         session_is_mirrored: bool,
@@ -84,6 +85,7 @@ impl FloatingPanes {
             active_panes: ActivePanes::new(&os_input),
             pane_being_moved_with_mouse: None,
             senders,
+            window_title: None,
         }
     }
     pub fn stack(&self) -> Option<FloatingPanesStack> {
@@ -234,6 +236,7 @@ impl FloatingPanes {
             .or_else(|| self.panes.keys().next().copied())
     }
     pub fn toggle_show_panes(&mut self, should_show_floating_panes: bool) {
+        self.window_title = None; // clear so that it will be re-rendered once we toggle back
         self.show_panes = should_show_floating_panes;
         if should_show_floating_panes {
             self.active_panes.focus_all_panes(&mut self.panes);
@@ -316,6 +319,20 @@ impl FloatingPanes {
     pub fn last_floating_pane_id(&self) -> Option<PaneId> {
         self.panes.keys().last().copied()
     }
+    pub fn last_selectable_floating_pane_id(&self) -> Option<PaneId> {
+        self.panes
+            .iter()
+            .filter(|(_p_id, p)| p.selectable())
+            .last()
+            .map(|(p_id, _p)| *p_id)
+    }
+    pub fn has_selectable_panes(&self) -> bool {
+        self.panes
+            .iter()
+            .filter(|(_p_id, p)| p.selectable())
+            .last()
+            .is_some()
+    }
     pub fn first_active_floating_pane_id(&self) -> Option<PaneId> {
         self.active_panes.values().next().copied()
     }
@@ -343,15 +360,50 @@ impl FloatingPanes {
         }
         Ok(())
     }
-    pub fn render(&mut self, output: &mut Output) -> Result<()> {
+    pub fn render(
+        &mut self,
+        output: &mut Output,
+        mouse_hover_pane_id: &HashMap<ClientId, PaneId>,
+        current_pane_group: HashMap<ClientId, Vec<PaneId>>,
+        client_id_override: Option<ClientId>,
+    ) -> Result<()> {
         let err_context = || "failed to render output";
-        let connected_clients: Vec<ClientId> =
+        let mut connected_clients: HashSet<ClientId> =
             { self.connected_clients.borrow().iter().copied().collect() };
+
+        // If we have a client_id_override (for watcher rendering), add it temporarily
+        if let Some(override_id) = client_id_override {
+            connected_clients.insert(override_id);
+        }
+
+        let connected_clients: Vec<ClientId> = connected_clients.into_iter().collect();
         let active_panes = if self.panes_are_visible() {
             self.active_panes.clone_active_panes()
         } else {
             Default::default()
         };
+
+        for (kind, pane) in &self.panes {
+            match kind {
+                PaneId::Terminal(_) => {
+                    output.add_pane_contents(
+                        &connected_clients,
+                        pane.pid(),
+                        pane.pane_contents(None, false),
+                    );
+                },
+                PaneId::Plugin(_) => {
+                    for client_id in &connected_clients {
+                        output.add_pane_contents(
+                            &[*client_id],
+                            pane.pid(),
+                            pane.pane_contents(Some(*client_id), false),
+                        );
+                    }
+                },
+            }
+        }
+
         let mut floating_panes: Vec<_> = if self.panes_are_visible() {
             self.panes.iter_mut().collect()
         } else if self.has_pinned_panes() {
@@ -383,6 +435,7 @@ impl FloatingPanes {
             let multiple_users_exist_in_session =
                 { self.connected_clients_in_app.borrow().len() > 1 };
             active_panes.retain(|c_id, _| self.connected_clients.borrow().contains(c_id));
+            let pane_is_selectable = pane.selectable();
             let mut pane_contents_and_ui = PaneContentsAndUi::new(
                 pane,
                 output,
@@ -393,6 +446,8 @@ impl FloatingPanes {
                 false,
                 false,
                 true,
+                mouse_hover_pane_id,
+                current_pane_group.clone(),
             );
             for client_id in &connected_clients {
                 let client_mode = self
@@ -408,6 +463,7 @@ impl FloatingPanes {
                         client_mode,
                         self.session_is_mirrored,
                         is_floating,
+                        pane_is_selectable,
                     )
                     .with_context(err_context)?;
                 if let PaneId::Plugin(..) = kind {
@@ -415,6 +471,11 @@ impl FloatingPanes {
                         .render_pane_contents_for_client(*client_id)
                         .with_context(err_context)?;
                 }
+                pane_contents_and_ui.render_terminal_title_if_needed(
+                    *client_id,
+                    client_mode,
+                    &mut self.window_title,
+                );
                 // this is done for panes that don't have their own cursor (eg. panes of
                 // another user)
                 pane_contents_and_ui
@@ -1095,10 +1156,10 @@ impl FloatingPanes {
             Err(anyhow!("Pane not found"))
         }
     }
-    pub fn pane_info(&self) -> Vec<PaneInfo> {
+    pub fn pane_info(&self, current_pane_group: &HashMap<ClientId, Vec<PaneId>>) -> Vec<PaneInfo> {
         let mut pane_infos = vec![];
         for (pane_id, pane) in self.panes.iter() {
-            let mut pane_info_for_pane = pane_info_for_pane(pane_id, pane);
+            let mut pane_info_for_pane = pane_info_for_pane(pane_id, pane, current_pane_group);
             let is_focused = self.active_panes.pane_id_is_focused(pane_id);
             pane_info_for_pane.is_floating = true;
             pane_info_for_pane.is_suppressed = false;
@@ -1138,5 +1199,49 @@ impl FloatingPanes {
         for pane in self.panes.values_mut() {
             pane.update_rounded_corners(rounded_corners);
         }
+    }
+    pub fn next_selectable_pane_id_above(&mut self, pane_id: &PaneId) -> Option<PaneId> {
+        let display_area = *self.display_area.borrow();
+        let viewport = *self.viewport.borrow();
+        let floating_pane_grid = FloatingPaneGrid::new(
+            &mut self.panes,
+            &mut self.desired_pane_positions,
+            display_area,
+            viewport,
+        );
+        floating_pane_grid.next_selectable_pane_id_above(&pane_id)
+    }
+    pub fn next_selectable_pane_id_below(&mut self, pane_id: &PaneId) -> Option<PaneId> {
+        let display_area = *self.display_area.borrow();
+        let viewport = *self.viewport.borrow();
+        let floating_pane_grid = FloatingPaneGrid::new(
+            &mut self.panes,
+            &mut self.desired_pane_positions,
+            display_area,
+            viewport,
+        );
+        floating_pane_grid.next_selectable_pane_id_below(&pane_id)
+    }
+    pub fn next_selectable_pane_id_to_the_left(&mut self, pane_id: &PaneId) -> Option<PaneId> {
+        let display_area = *self.display_area.borrow();
+        let viewport = *self.viewport.borrow();
+        let floating_pane_grid = FloatingPaneGrid::new(
+            &mut self.panes,
+            &mut self.desired_pane_positions,
+            display_area,
+            viewport,
+        );
+        floating_pane_grid.next_selectable_pane_id_to_the_left(&pane_id)
+    }
+    pub fn next_selectable_pane_id_to_the_right(&mut self, pane_id: &PaneId) -> Option<PaneId> {
+        let display_area = *self.display_area.borrow();
+        let viewport = *self.viewport.borrow();
+        let floating_pane_grid = FloatingPaneGrid::new(
+            &mut self.panes,
+            &mut self.desired_pane_positions,
+            display_area,
+            viewport,
+        );
+        floating_pane_grid.next_selectable_pane_id_to_the_right(&pane_id)
     }
 }

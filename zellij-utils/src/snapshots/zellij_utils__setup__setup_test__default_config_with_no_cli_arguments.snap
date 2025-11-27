@@ -1,6 +1,5 @@
 ---
 source: zellij-utils/src/setup.rs
-assertion_line: 755
 expression: "format!(\"{:#?}\", config)"
 ---
 Config {
@@ -12,9 +11,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Left,
-                ),
+                MoveFocusOrTab {
+                    direction: Left,
+                },
             ],
             KeyWithModifier {
                 bare_key: Down,
@@ -22,9 +21,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Down,
-                ),
+                MoveFocus {
+                    direction: Down,
+                },
             ],
             KeyWithModifier {
                 bare_key: Up,
@@ -32,9 +31,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Up,
-                ),
+                MoveFocus {
+                    direction: Up,
+                },
             ],
             KeyWithModifier {
                 bare_key: Right,
@@ -42,9 +41,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Right,
-                ),
+                MoveFocusOrTab {
+                    direction: Right,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -54,10 +53,10 @@ Config {
                     Alt,
                 },
             }: [
-                Resize(
-                    Increase,
-                    None,
-                ),
+                Resize {
+                    resize: Increase,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -67,10 +66,10 @@ Config {
                     Alt,
                 },
             }: [
-                Resize(
-                    Decrease,
-                    None,
-                ),
+                Resize {
+                    resize: Decrease,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -80,10 +79,10 @@ Config {
                     Alt,
                 },
             }: [
-                Resize(
-                    Increase,
-                    None,
-                ),
+                Resize {
+                    resize: Increase,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -113,9 +112,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Tmux,
-                ),
+                SwitchToMode {
+                    input_mode: Tmux,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -135,9 +134,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Locked,
-                ),
+                SwitchToMode {
+                    input_mode: Locked,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -147,9 +146,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Move,
-                ),
+                SwitchToMode {
+                    input_mode: Move,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -159,9 +158,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Left,
-                ),
+                MoveFocusOrTab {
+                    direction: Left,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -171,9 +170,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveTab(
-                    Left,
-                ),
+                MoveTab {
+                    direction: Left,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -183,9 +182,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Down,
-                ),
+                MoveFocus {
+                    direction: Down,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -195,9 +194,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Up,
-                ),
+                MoveFocus {
+                    direction: Up,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -207,9 +206,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Right,
-                ),
+                MoveFocusOrTab {
+                    direction: Right,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -219,9 +218,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Resize,
-                ),
+                SwitchToMode {
+                    input_mode: Resize,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -231,11 +230,11 @@ Config {
                     Alt,
                 },
             }: [
-                NewPane(
-                    None,
-                    None,
-                    false,
-                ),
+                NewPane {
+                    direction: None,
+                    pane_name: None,
+                    start_suppressed: false,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -245,9 +244,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Session,
-                ),
+                SwitchToMode {
+                    input_mode: Session,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -257,9 +256,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveTab(
-                    Right,
-                ),
+                MoveTab {
+                    direction: Right,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -269,9 +268,30 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Pane,
+                SwitchToMode {
+                    input_mode: Pane,
+                },
+            ],
+            KeyWithModifier {
+                bare_key: Char(
+                    'p',
                 ),
+                key_modifiers: {
+                    Alt,
+                },
+            }: [
+                TogglePaneInGroup,
+            ],
+            KeyWithModifier {
+                bare_key: Char(
+                    'p',
+                ),
+                key_modifiers: {
+                    Alt,
+                    Shift,
+                },
+            }: [
+                ToggleGroupMarking,
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -291,9 +311,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Scroll,
-                ),
+                SwitchToMode {
+                    input_mode: Scroll,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -303,9 +323,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Tab,
-                ),
+                SwitchToMode {
+                    input_mode: Tab,
+                },
             ],
         },
         Locked: {
@@ -317,9 +337,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
         },
         Resize: {
@@ -327,12 +347,12 @@ Config {
                 bare_key: Left,
                 key_modifiers: {},
             }: [
-                Resize(
-                    Increase,
-                    Some(
+                Resize {
+                    resize: Increase,
+                    direction: Some(
                         Left,
                     ),
-                ),
+                },
             ],
             KeyWithModifier {
                 bare_key: Left,
@@ -340,20 +360,20 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Left,
-                ),
+                MoveFocusOrTab {
+                    direction: Left,
+                },
             ],
             KeyWithModifier {
                 bare_key: Down,
                 key_modifiers: {},
             }: [
-                Resize(
-                    Increase,
-                    Some(
+                Resize {
+                    resize: Increase,
+                    direction: Some(
                         Down,
                     ),
-                ),
+                },
             ],
             KeyWithModifier {
                 bare_key: Down,
@@ -361,20 +381,20 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Down,
-                ),
+                MoveFocus {
+                    direction: Down,
+                },
             ],
             KeyWithModifier {
                 bare_key: Up,
                 key_modifiers: {},
             }: [
-                Resize(
-                    Increase,
-                    Some(
+                Resize {
+                    resize: Increase,
+                    direction: Some(
                         Up,
                     ),
-                ),
+                },
             ],
             KeyWithModifier {
                 bare_key: Up,
@@ -382,20 +402,20 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Up,
-                ),
+                MoveFocus {
+                    direction: Up,
+                },
             ],
             KeyWithModifier {
                 bare_key: Right,
                 key_modifiers: {},
             }: [
-                Resize(
-                    Increase,
-                    Some(
+                Resize {
+                    resize: Increase,
+                    direction: Some(
                         Right,
                     ),
-                ),
+                },
             ],
             KeyWithModifier {
                 bare_key: Right,
@@ -403,9 +423,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Right,
-                ),
+                MoveFocusOrTab {
+                    direction: Right,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -413,10 +433,10 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                Resize(
-                    Increase,
-                    None,
-                ),
+                Resize {
+                    resize: Increase,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -426,10 +446,10 @@ Config {
                     Alt,
                 },
             }: [
-                Resize(
-                    Increase,
-                    None,
-                ),
+                Resize {
+                    resize: Increase,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -437,10 +457,10 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                Resize(
-                    Decrease,
-                    None,
-                ),
+                Resize {
+                    resize: Decrease,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -450,10 +470,10 @@ Config {
                     Alt,
                 },
             }: [
-                Resize(
-                    Decrease,
-                    None,
-                ),
+                Resize {
+                    resize: Decrease,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -461,10 +481,10 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                Resize(
-                    Increase,
-                    None,
-                ),
+                Resize {
+                    resize: Increase,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -474,10 +494,10 @@ Config {
                     Alt,
                 },
             }: [
-                Resize(
-                    Increase,
-                    None,
-                ),
+                Resize {
+                    resize: Increase,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -485,12 +505,12 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                Resize(
-                    Decrease,
-                    Some(
+                Resize {
+                    resize: Decrease,
+                    direction: Some(
                         Left,
                     ),
-                ),
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -498,12 +518,12 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                Resize(
-                    Decrease,
-                    Some(
+                Resize {
+                    resize: Decrease,
+                    direction: Some(
                         Down,
                     ),
-                ),
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -511,12 +531,12 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                Resize(
-                    Decrease,
-                    Some(
+                Resize {
+                    resize: Decrease,
+                    direction: Some(
                         Up,
                     ),
-                ),
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -524,12 +544,12 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                Resize(
-                    Decrease,
-                    Some(
+                Resize {
+                    resize: Decrease,
+                    direction: Some(
                         Right,
                     ),
-                ),
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -559,9 +579,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Tmux,
-                ),
+                SwitchToMode {
+                    input_mode: Tmux,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -581,9 +601,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Locked,
-                ),
+                SwitchToMode {
+                    input_mode: Locked,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -591,12 +611,12 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                Resize(
-                    Increase,
-                    Some(
+                Resize {
+                    resize: Increase,
+                    direction: Some(
                         Left,
                     ),
-                ),
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -606,9 +626,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Move,
-                ),
+                SwitchToMode {
+                    input_mode: Move,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -618,9 +638,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Left,
-                ),
+                MoveFocusOrTab {
+                    direction: Left,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -630,9 +650,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveTab(
-                    Left,
-                ),
+                MoveTab {
+                    direction: Left,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -640,12 +660,12 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                Resize(
-                    Increase,
-                    Some(
+                Resize {
+                    resize: Increase,
+                    direction: Some(
                         Down,
                     ),
-                ),
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -655,9 +675,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Down,
-                ),
+                MoveFocus {
+                    direction: Down,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -665,12 +685,12 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                Resize(
-                    Increase,
-                    Some(
+                Resize {
+                    resize: Increase,
+                    direction: Some(
                         Up,
                     ),
-                ),
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -680,9 +700,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Up,
-                ),
+                MoveFocus {
+                    direction: Up,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -690,12 +710,12 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                Resize(
-                    Increase,
-                    Some(
+                Resize {
+                    resize: Increase,
+                    direction: Some(
                         Right,
                     ),
-                ),
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -705,9 +725,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Right,
-                ),
+                MoveFocusOrTab {
+                    direction: Right,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -717,9 +737,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -729,11 +749,11 @@ Config {
                     Alt,
                 },
             }: [
-                NewPane(
-                    None,
-                    None,
-                    false,
-                ),
+                NewPane {
+                    direction: None,
+                    pane_name: None,
+                    start_suppressed: false,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -743,9 +763,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Session,
-                ),
+                SwitchToMode {
+                    input_mode: Session,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -755,9 +775,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveTab(
-                    Right,
-                ),
+                MoveTab {
+                    direction: Right,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -767,9 +787,30 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Pane,
+                SwitchToMode {
+                    input_mode: Pane,
+                },
+            ],
+            KeyWithModifier {
+                bare_key: Char(
+                    'p',
                 ),
+                key_modifiers: {
+                    Alt,
+                },
+            }: [
+                TogglePaneInGroup,
+            ],
+            KeyWithModifier {
+                bare_key: Char(
+                    'p',
+                ),
+                key_modifiers: {
+                    Alt,
+                    Shift,
+                },
+            }: [
+                ToggleGroupMarking,
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -789,9 +830,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Scroll,
-                ),
+                SwitchToMode {
+                    input_mode: Scroll,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -801,25 +842,25 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Tab,
-                ),
+                SwitchToMode {
+                    input_mode: Tab,
+                },
             ],
             KeyWithModifier {
                 bare_key: Esc,
                 key_modifiers: {},
             }: [
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Enter,
                 key_modifiers: {},
             }: [
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
         },
         Pane: {
@@ -827,9 +868,9 @@ Config {
                 bare_key: Left,
                 key_modifiers: {},
             }: [
-                MoveFocus(
-                    Left,
-                ),
+                MoveFocus {
+                    direction: Left,
+                },
             ],
             KeyWithModifier {
                 bare_key: Left,
@@ -837,17 +878,17 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Left,
-                ),
+                MoveFocusOrTab {
+                    direction: Left,
+                },
             ],
             KeyWithModifier {
                 bare_key: Down,
                 key_modifiers: {},
             }: [
-                MoveFocus(
-                    Down,
-                ),
+                MoveFocus {
+                    direction: Down,
+                },
             ],
             KeyWithModifier {
                 bare_key: Down,
@@ -855,17 +896,17 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Down,
-                ),
+                MoveFocus {
+                    direction: Down,
+                },
             ],
             KeyWithModifier {
                 bare_key: Up,
                 key_modifiers: {},
             }: [
-                MoveFocus(
-                    Up,
-                ),
+                MoveFocus {
+                    direction: Up,
+                },
             ],
             KeyWithModifier {
                 bare_key: Up,
@@ -873,17 +914,17 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Up,
-                ),
+                MoveFocus {
+                    direction: Up,
+                },
             ],
             KeyWithModifier {
                 bare_key: Right,
                 key_modifiers: {},
             }: [
-                MoveFocus(
-                    Right,
-                ),
+                MoveFocus {
+                    direction: Right,
+                },
             ],
             KeyWithModifier {
                 bare_key: Right,
@@ -891,9 +932,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Right,
-                ),
+                MoveFocusOrTab {
+                    direction: Right,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -903,10 +944,10 @@ Config {
                     Alt,
                 },
             }: [
-                Resize(
-                    Increase,
-                    None,
-                ),
+                Resize {
+                    resize: Increase,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -916,10 +957,10 @@ Config {
                     Alt,
                 },
             }: [
-                Resize(
-                    Decrease,
-                    None,
-                ),
+                Resize {
+                    resize: Decrease,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -929,10 +970,10 @@ Config {
                     Alt,
                 },
             }: [
-                Resize(
-                    Increase,
-                    None,
-                ),
+                Resize {
+                    resize: Increase,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -962,9 +1003,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Tmux,
-                ),
+                SwitchToMode {
+                    input_mode: Tmux,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -972,14 +1013,14 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                SwitchToMode(
-                    RenamePane,
-                ),
-                PaneNameInput(
-                    [
+                SwitchToMode {
+                    input_mode: RenamePane,
+                },
+                PaneNameInput {
+                    input: [
                         0,
                     ],
-                ),
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -987,16 +1028,16 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                NewPane(
-                    Some(
+                NewPane {
+                    direction: Some(
                         Down,
                     ),
-                    None,
-                    false,
-                ),
-                SwitchToMode(
-                    Normal,
-                ),
+                    pane_name: None,
+                    start_suppressed: false,
+                },
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1005,9 +1046,9 @@ Config {
                 key_modifiers: {},
             }: [
                 TogglePaneEmbedOrFloating,
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1016,9 +1057,9 @@ Config {
                 key_modifiers: {},
             }: [
                 ToggleFocusFullscreen,
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1038,9 +1079,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Locked,
-                ),
+                SwitchToMode {
+                    input_mode: Locked,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1048,9 +1089,9 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                MoveFocus(
-                    Left,
-                ),
+                MoveFocus {
+                    direction: Left,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1060,9 +1101,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Move,
-                ),
+                SwitchToMode {
+                    input_mode: Move,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1072,9 +1113,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Left,
-                ),
+                MoveFocusOrTab {
+                    direction: Left,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1083,9 +1124,9 @@ Config {
                 key_modifiers: {},
             }: [
                 TogglePanePinned,
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1095,9 +1136,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveTab(
-                    Left,
-                ),
+                MoveTab {
+                    direction: Left,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1105,9 +1146,9 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                MoveFocus(
-                    Down,
-                ),
+                MoveFocus {
+                    direction: Down,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1117,9 +1158,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Down,
-                ),
+                MoveFocus {
+                    direction: Down,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1127,9 +1168,9 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                MoveFocus(
-                    Up,
-                ),
+                MoveFocus {
+                    direction: Up,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1139,9 +1180,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Up,
-                ),
+                MoveFocus {
+                    direction: Up,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1149,9 +1190,9 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                MoveFocus(
-                    Right,
-                ),
+                MoveFocus {
+                    direction: Right,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1161,9 +1202,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Right,
-                ),
+                MoveFocusOrTab {
+                    direction: Right,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1171,14 +1212,14 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                NewPane(
-                    None,
-                    None,
-                    false,
-                ),
-                SwitchToMode(
-                    Normal,
-                ),
+                NewPane {
+                    direction: None,
+                    pane_name: None,
+                    start_suppressed: false,
+                },
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1188,9 +1229,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Resize,
-                ),
+                SwitchToMode {
+                    input_mode: Resize,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1200,11 +1241,11 @@ Config {
                     Alt,
                 },
             }: [
-                NewPane(
-                    None,
-                    None,
-                    false,
-                ),
+                NewPane {
+                    direction: None,
+                    pane_name: None,
+                    start_suppressed: false,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1214,9 +1255,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Session,
-                ),
+                SwitchToMode {
+                    input_mode: Session,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1226,9 +1267,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveTab(
-                    Right,
-                ),
+                MoveTab {
+                    direction: Right,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1246,9 +1287,30 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Normal,
+                SwitchToMode {
+                    input_mode: Normal,
+                },
+            ],
+            KeyWithModifier {
+                bare_key: Char(
+                    'p',
                 ),
+                key_modifiers: {
+                    Alt,
+                },
+            }: [
+                TogglePaneInGroup,
+            ],
+            KeyWithModifier {
+                bare_key: Char(
+                    'p',
+                ),
+                key_modifiers: {
+                    Alt,
+                    Shift,
+                },
+            }: [
+                ToggleGroupMarking,
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1266,16 +1328,30 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                NewPane(
-                    Some(
+                NewPane {
+                    direction: Some(
                         Right,
                     ),
-                    None,
-                    false,
+                    pane_name: None,
+                    start_suppressed: false,
+                },
+                SwitchToMode {
+                    input_mode: Normal,
+                },
+            ],
+            KeyWithModifier {
+                bare_key: Char(
+                    's',
                 ),
-                SwitchToMode(
-                    Normal,
-                ),
+                key_modifiers: {},
+            }: [
+                NewStackedPane {
+                    command: None,
+                    pane_name: None,
+                },
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1285,9 +1361,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Scroll,
-                ),
+                SwitchToMode {
+                    input_mode: Scroll,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1297,9 +1373,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Tab,
-                ),
+                SwitchToMode {
+                    input_mode: Tab,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1308,9 +1384,9 @@ Config {
                 key_modifiers: {},
             }: [
                 ToggleFloatingPanes,
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1319,9 +1395,9 @@ Config {
                 key_modifiers: {},
             }: [
                 CloseFocus,
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1330,25 +1406,25 @@ Config {
                 key_modifiers: {},
             }: [
                 TogglePaneFrames,
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Esc,
                 key_modifiers: {},
             }: [
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Enter,
                 key_modifiers: {},
             }: [
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
         },
         Tab: {
@@ -1364,9 +1440,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Left,
-                ),
+                MoveFocusOrTab {
+                    direction: Left,
+                },
             ],
             KeyWithModifier {
                 bare_key: Down,
@@ -1380,9 +1456,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Down,
-                ),
+                MoveFocus {
+                    direction: Down,
+                },
             ],
             KeyWithModifier {
                 bare_key: Up,
@@ -1396,9 +1472,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Up,
-                ),
+                MoveFocus {
+                    direction: Up,
+                },
             ],
             KeyWithModifier {
                 bare_key: Right,
@@ -1412,9 +1488,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Right,
-                ),
+                MoveFocusOrTab {
+                    direction: Right,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1424,10 +1500,10 @@ Config {
                     Alt,
                 },
             }: [
-                Resize(
-                    Increase,
-                    None,
-                ),
+                Resize {
+                    resize: Increase,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1437,10 +1513,10 @@ Config {
                     Alt,
                 },
             }: [
-                Resize(
-                    Decrease,
-                    None,
-                ),
+                Resize {
+                    resize: Decrease,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1448,12 +1524,12 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                GoToTab(
-                    1,
-                ),
-                SwitchToMode(
-                    Normal,
-                ),
+                GoToTab {
+                    index: 1,
+                },
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1461,12 +1537,12 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                GoToTab(
-                    2,
-                ),
-                SwitchToMode(
-                    Normal,
-                ),
+                GoToTab {
+                    index: 2,
+                },
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1474,12 +1550,12 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                GoToTab(
-                    3,
-                ),
-                SwitchToMode(
-                    Normal,
-                ),
+                GoToTab {
+                    index: 3,
+                },
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1487,12 +1563,12 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                GoToTab(
-                    4,
-                ),
-                SwitchToMode(
-                    Normal,
-                ),
+                GoToTab {
+                    index: 4,
+                },
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1500,12 +1576,12 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                GoToTab(
-                    5,
-                ),
-                SwitchToMode(
-                    Normal,
-                ),
+                GoToTab {
+                    index: 5,
+                },
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1513,12 +1589,12 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                GoToTab(
-                    6,
-                ),
-                SwitchToMode(
-                    Normal,
-                ),
+                GoToTab {
+                    index: 6,
+                },
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1526,12 +1602,12 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                GoToTab(
-                    7,
-                ),
-                SwitchToMode(
-                    Normal,
-                ),
+                GoToTab {
+                    index: 7,
+                },
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1539,12 +1615,12 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                GoToTab(
-                    8,
-                ),
-                SwitchToMode(
-                    Normal,
-                ),
+                GoToTab {
+                    index: 8,
+                },
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1552,12 +1628,12 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                GoToTab(
-                    9,
-                ),
-                SwitchToMode(
-                    Normal,
-                ),
+                GoToTab {
+                    index: 9,
+                },
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1567,10 +1643,10 @@ Config {
                     Alt,
                 },
             }: [
-                Resize(
-                    Increase,
-                    None,
-                ),
+                Resize {
+                    resize: Increase,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1579,9 +1655,9 @@ Config {
                 key_modifiers: {},
             }: [
                 BreakPaneLeft,
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1600,9 +1676,9 @@ Config {
                 key_modifiers: {},
             }: [
                 BreakPaneRight,
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1621,9 +1697,9 @@ Config {
                 key_modifiers: {},
             }: [
                 BreakPane,
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1633,9 +1709,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Tmux,
-                ),
+                SwitchToMode {
+                    input_mode: Tmux,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1655,9 +1731,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Locked,
-                ),
+                SwitchToMode {
+                    input_mode: Locked,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1675,9 +1751,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Move,
-                ),
+                SwitchToMode {
+                    input_mode: Move,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1687,9 +1763,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Left,
-                ),
+                MoveFocusOrTab {
+                    direction: Left,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1699,9 +1775,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveTab(
-                    Left,
-                ),
+                MoveTab {
+                    direction: Left,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1719,9 +1795,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Down,
-                ),
+                MoveFocus {
+                    direction: Down,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1739,9 +1815,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Up,
-                ),
+                MoveFocus {
+                    direction: Up,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1759,9 +1835,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Right,
-                ),
+                MoveFocusOrTab {
+                    direction: Right,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1769,17 +1845,18 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                NewTab(
-                    None,
-                    [],
-                    None,
-                    None,
-                    None,
-                    true,
-                ),
-                SwitchToMode(
-                    Normal,
-                ),
+                NewTab {
+                    tiled_layout: None,
+                    floating_layouts: [],
+                    swap_tiled_layouts: None,
+                    swap_floating_layouts: None,
+                    tab_name: None,
+                    should_change_focus_to_new_tab: true,
+                    cwd: None,
+                },
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1789,9 +1866,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Resize,
-                ),
+                SwitchToMode {
+                    input_mode: Resize,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1801,11 +1878,11 @@ Config {
                     Alt,
                 },
             }: [
-                NewPane(
-                    None,
-                    None,
-                    false,
-                ),
+                NewPane {
+                    direction: None,
+                    pane_name: None,
+                    start_suppressed: false,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1815,9 +1892,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Session,
-                ),
+                SwitchToMode {
+                    input_mode: Session,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1827,9 +1904,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveTab(
-                    Right,
-                ),
+                MoveTab {
+                    direction: Right,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1839,9 +1916,30 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Pane,
+                SwitchToMode {
+                    input_mode: Pane,
+                },
+            ],
+            KeyWithModifier {
+                bare_key: Char(
+                    'p',
                 ),
+                key_modifiers: {
+                    Alt,
+                },
+            }: [
+                TogglePaneInGroup,
+            ],
+            KeyWithModifier {
+                bare_key: Char(
+                    'p',
+                ),
+                key_modifiers: {
+                    Alt,
+                    Shift,
+                },
+            }: [
+                ToggleGroupMarking,
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1859,14 +1957,14 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                SwitchToMode(
-                    RenameTab,
-                ),
-                TabNameInput(
-                    [
+                SwitchToMode {
+                    input_mode: RenameTab,
+                },
+                TabNameInput {
+                    input: [
                         0,
                     ],
-                ),
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1875,9 +1973,9 @@ Config {
                 key_modifiers: {},
             }: [
                 ToggleActiveSyncTab,
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1887,9 +1985,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Scroll,
-                ),
+                SwitchToMode {
+                    input_mode: Scroll,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1899,9 +1997,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -1910,9 +2008,9 @@ Config {
                 key_modifiers: {},
             }: [
                 CloseTab,
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Tab,
@@ -1924,17 +2022,17 @@ Config {
                 bare_key: Esc,
                 key_modifiers: {},
             }: [
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Enter,
                 key_modifiers: {},
             }: [
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
         },
         Scroll: {
@@ -1962,9 +2060,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Left,
-                ),
+                MoveFocusOrTab {
+                    direction: Left,
+                },
             ],
             KeyWithModifier {
                 bare_key: Down,
@@ -1978,9 +2076,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Down,
-                ),
+                MoveFocus {
+                    direction: Down,
+                },
             ],
             KeyWithModifier {
                 bare_key: Up,
@@ -1994,9 +2092,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Up,
-                ),
+                MoveFocus {
+                    direction: Up,
+                },
             ],
             KeyWithModifier {
                 bare_key: Right,
@@ -2010,9 +2108,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Right,
-                ),
+                MoveFocusOrTab {
+                    direction: Right,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2022,10 +2120,10 @@ Config {
                     Alt,
                 },
             }: [
-                Resize(
-                    Increase,
-                    None,
-                ),
+                Resize {
+                    resize: Increase,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2035,10 +2133,10 @@ Config {
                     Alt,
                 },
             }: [
-                Resize(
-                    Decrease,
-                    None,
-                ),
+                Resize {
+                    resize: Decrease,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2048,10 +2146,10 @@ Config {
                     Alt,
                 },
             }: [
-                Resize(
-                    Increase,
-                    None,
-                ),
+                Resize {
+                    resize: Increase,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2092,9 +2190,9 @@ Config {
                 },
             }: [
                 ScrollToBottom,
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2111,9 +2209,9 @@ Config {
                 key_modifiers: {},
             }: [
                 EditScrollback,
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2143,9 +2241,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Locked,
-                ),
+                SwitchToMode {
+                    input_mode: Locked,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2163,9 +2261,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Move,
-                ),
+                SwitchToMode {
+                    input_mode: Move,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2175,9 +2273,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Left,
-                ),
+                MoveFocusOrTab {
+                    direction: Left,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2187,9 +2285,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveTab(
-                    Left,
-                ),
+                MoveTab {
+                    direction: Left,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2207,9 +2305,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Down,
-                ),
+                MoveFocus {
+                    direction: Down,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2227,9 +2325,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Up,
-                ),
+                MoveFocus {
+                    direction: Up,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2247,9 +2345,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Right,
-                ),
+                MoveFocusOrTab {
+                    direction: Right,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2259,9 +2357,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Resize,
-                ),
+                SwitchToMode {
+                    input_mode: Resize,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2271,11 +2369,11 @@ Config {
                     Alt,
                 },
             }: [
-                NewPane(
-                    None,
-                    None,
-                    false,
-                ),
+                NewPane {
+                    direction: None,
+                    pane_name: None,
+                    start_suppressed: false,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2285,9 +2383,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Session,
-                ),
+                SwitchToMode {
+                    input_mode: Session,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2297,9 +2395,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveTab(
-                    Right,
-                ),
+                MoveTab {
+                    direction: Right,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2309,9 +2407,30 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Pane,
+                SwitchToMode {
+                    input_mode: Pane,
+                },
+            ],
+            KeyWithModifier {
+                bare_key: Char(
+                    'p',
                 ),
+                key_modifiers: {
+                    Alt,
+                },
+            }: [
+                TogglePaneInGroup,
+            ],
+            KeyWithModifier {
+                bare_key: Char(
+                    'p',
+                ),
+                key_modifiers: {
+                    Alt,
+                    Shift,
+                },
+            }: [
+                ToggleGroupMarking,
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2329,14 +2448,14 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                SwitchToMode(
-                    EnterSearch,
-                ),
-                SearchInput(
-                    [
+                SwitchToMode {
+                    input_mode: EnterSearch,
+                },
+                SearchInput {
+                    input: [
                         0,
                     ],
-                ),
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2346,9 +2465,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2358,9 +2477,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Tab,
-                ),
+                SwitchToMode {
+                    input_mode: Tab,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2374,17 +2493,17 @@ Config {
                 bare_key: Esc,
                 key_modifiers: {},
             }: [
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Enter,
                 key_modifiers: {},
             }: [
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
         },
         EnterSearch: {
@@ -2394,9 +2513,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Left,
-                ),
+                MoveFocusOrTab {
+                    direction: Left,
+                },
             ],
             KeyWithModifier {
                 bare_key: Down,
@@ -2404,9 +2523,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Down,
-                ),
+                MoveFocus {
+                    direction: Down,
+                },
             ],
             KeyWithModifier {
                 bare_key: Up,
@@ -2414,9 +2533,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Up,
-                ),
+                MoveFocus {
+                    direction: Up,
+                },
             ],
             KeyWithModifier {
                 bare_key: Right,
@@ -2424,9 +2543,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Right,
-                ),
+                MoveFocusOrTab {
+                    direction: Right,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2436,10 +2555,10 @@ Config {
                     Alt,
                 },
             }: [
-                Resize(
-                    Increase,
-                    None,
-                ),
+                Resize {
+                    resize: Increase,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2449,10 +2568,10 @@ Config {
                     Alt,
                 },
             }: [
-                Resize(
-                    Decrease,
-                    None,
-                ),
+                Resize {
+                    resize: Decrease,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2462,10 +2581,10 @@ Config {
                     Alt,
                 },
             }: [
-                Resize(
-                    Increase,
-                    None,
-                ),
+                Resize {
+                    resize: Increase,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2495,9 +2614,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Tmux,
-                ),
+                SwitchToMode {
+                    input_mode: Tmux,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2507,9 +2626,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Scroll,
-                ),
+                SwitchToMode {
+                    input_mode: Scroll,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2529,9 +2648,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Locked,
-                ),
+                SwitchToMode {
+                    input_mode: Locked,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2541,9 +2660,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Move,
-                ),
+                SwitchToMode {
+                    input_mode: Move,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2553,9 +2672,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Left,
-                ),
+                MoveFocusOrTab {
+                    direction: Left,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2565,9 +2684,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveTab(
-                    Left,
-                ),
+                MoveTab {
+                    direction: Left,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2577,9 +2696,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Down,
-                ),
+                MoveFocus {
+                    direction: Down,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2589,9 +2708,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Up,
-                ),
+                MoveFocus {
+                    direction: Up,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2601,9 +2720,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Right,
-                ),
+                MoveFocusOrTab {
+                    direction: Right,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2613,9 +2732,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Resize,
-                ),
+                SwitchToMode {
+                    input_mode: Resize,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2625,11 +2744,11 @@ Config {
                     Alt,
                 },
             }: [
-                NewPane(
-                    None,
-                    None,
-                    false,
-                ),
+                NewPane {
+                    direction: None,
+                    pane_name: None,
+                    start_suppressed: false,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2639,9 +2758,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Session,
-                ),
+                SwitchToMode {
+                    input_mode: Session,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2651,9 +2770,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveTab(
-                    Right,
-                ),
+                MoveTab {
+                    direction: Right,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2663,9 +2782,30 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Pane,
+                SwitchToMode {
+                    input_mode: Pane,
+                },
+            ],
+            KeyWithModifier {
+                bare_key: Char(
+                    'p',
                 ),
+                key_modifiers: {
+                    Alt,
+                },
+            }: [
+                TogglePaneInGroup,
+            ],
+            KeyWithModifier {
+                bare_key: Char(
+                    'p',
+                ),
+                key_modifiers: {
+                    Alt,
+                    Shift,
+                },
+            }: [
+                ToggleGroupMarking,
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2685,9 +2825,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Scroll,
-                ),
+                SwitchToMode {
+                    input_mode: Scroll,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2697,25 +2837,25 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Tab,
-                ),
+                SwitchToMode {
+                    input_mode: Tab,
+                },
             ],
             KeyWithModifier {
                 bare_key: Esc,
                 key_modifiers: {},
             }: [
-                SwitchToMode(
-                    Scroll,
-                ),
+                SwitchToMode {
+                    input_mode: Scroll,
+                },
             ],
             KeyWithModifier {
                 bare_key: Enter,
                 key_modifiers: {},
             }: [
-                SwitchToMode(
-                    Search,
-                ),
+                SwitchToMode {
+                    input_mode: Search,
+                },
             ],
         },
         Search: {
@@ -2743,9 +2883,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Left,
-                ),
+                MoveFocusOrTab {
+                    direction: Left,
+                },
             ],
             KeyWithModifier {
                 bare_key: Down,
@@ -2759,9 +2899,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Down,
-                ),
+                MoveFocus {
+                    direction: Down,
+                },
             ],
             KeyWithModifier {
                 bare_key: Up,
@@ -2775,9 +2915,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Up,
-                ),
+                MoveFocus {
+                    direction: Up,
+                },
             ],
             KeyWithModifier {
                 bare_key: Right,
@@ -2791,9 +2931,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Right,
-                ),
+                MoveFocusOrTab {
+                    direction: Right,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2803,10 +2943,10 @@ Config {
                     Alt,
                 },
             }: [
-                Resize(
-                    Increase,
-                    None,
-                ),
+                Resize {
+                    resize: Increase,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2816,10 +2956,10 @@ Config {
                     Alt,
                 },
             }: [
-                Resize(
-                    Decrease,
-                    None,
-                ),
+                Resize {
+                    resize: Decrease,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2829,10 +2969,10 @@ Config {
                     Alt,
                 },
             }: [
-                Resize(
-                    Increase,
-                    None,
-                ),
+                Resize {
+                    resize: Increase,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2870,9 +3010,9 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                SearchToggleOption(
-                    CaseSensitivity,
-                ),
+                SearchToggleOption {
+                    option: CaseSensitivity,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2883,9 +3023,9 @@ Config {
                 },
             }: [
                 ScrollToBottom,
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2923,9 +3063,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Locked,
-                ),
+                SwitchToMode {
+                    input_mode: Locked,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2943,9 +3083,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Move,
-                ),
+                SwitchToMode {
+                    input_mode: Move,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2955,9 +3095,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Left,
-                ),
+                MoveFocusOrTab {
+                    direction: Left,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2967,9 +3107,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveTab(
-                    Left,
-                ),
+                MoveTab {
+                    direction: Left,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -2987,9 +3127,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Down,
-                ),
+                MoveFocus {
+                    direction: Down,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3007,9 +3147,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Up,
-                ),
+                MoveFocus {
+                    direction: Up,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3027,9 +3167,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Right,
-                ),
+                MoveFocusOrTab {
+                    direction: Right,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3037,9 +3177,9 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                Search(
-                    Down,
-                ),
+                Search {
+                    direction: Down,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3049,9 +3189,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Resize,
-                ),
+                SwitchToMode {
+                    input_mode: Resize,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3061,11 +3201,11 @@ Config {
                     Alt,
                 },
             }: [
-                NewPane(
-                    None,
-                    None,
-                    false,
-                ),
+                NewPane {
+                    direction: None,
+                    pane_name: None,
+                    start_suppressed: false,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3073,9 +3213,9 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                SearchToggleOption(
-                    WholeWord,
-                ),
+                SearchToggleOption {
+                    option: WholeWord,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3085,9 +3225,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Session,
-                ),
+                SwitchToMode {
+                    input_mode: Session,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3097,9 +3237,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveTab(
-                    Right,
-                ),
+                MoveTab {
+                    direction: Right,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3107,9 +3247,9 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                Search(
-                    Up,
-                ),
+                Search {
+                    direction: Up,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3119,9 +3259,30 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Pane,
+                SwitchToMode {
+                    input_mode: Pane,
+                },
+            ],
+            KeyWithModifier {
+                bare_key: Char(
+                    'p',
                 ),
+                key_modifiers: {
+                    Alt,
+                },
+            }: [
+                TogglePaneInGroup,
+            ],
+            KeyWithModifier {
+                bare_key: Char(
+                    'p',
+                ),
+                key_modifiers: {
+                    Alt,
+                    Shift,
+                },
+            }: [
+                ToggleGroupMarking,
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3141,9 +3302,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3153,9 +3314,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Tab,
-                ),
+                SwitchToMode {
+                    input_mode: Tab,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3171,25 +3332,25 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                SearchToggleOption(
-                    Wrap,
-                ),
+                SearchToggleOption {
+                    option: Wrap,
+                },
             ],
             KeyWithModifier {
                 bare_key: Esc,
                 key_modifiers: {},
             }: [
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Enter,
                 key_modifiers: {},
             }: [
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
         },
         RenameTab: {
@@ -3199,9 +3360,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Left,
-                ),
+                MoveFocusOrTab {
+                    direction: Left,
+                },
             ],
             KeyWithModifier {
                 bare_key: Down,
@@ -3209,9 +3370,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Down,
-                ),
+                MoveFocus {
+                    direction: Down,
+                },
             ],
             KeyWithModifier {
                 bare_key: Up,
@@ -3219,9 +3380,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Up,
-                ),
+                MoveFocus {
+                    direction: Up,
+                },
             ],
             KeyWithModifier {
                 bare_key: Right,
@@ -3229,9 +3390,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Right,
-                ),
+                MoveFocusOrTab {
+                    direction: Right,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3241,10 +3402,10 @@ Config {
                     Alt,
                 },
             }: [
-                Resize(
-                    Increase,
-                    None,
-                ),
+                Resize {
+                    resize: Increase,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3254,10 +3415,10 @@ Config {
                     Alt,
                 },
             }: [
-                Resize(
-                    Decrease,
-                    None,
-                ),
+                Resize {
+                    resize: Decrease,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3267,10 +3428,10 @@ Config {
                     Alt,
                 },
             }: [
-                Resize(
-                    Increase,
-                    None,
-                ),
+                Resize {
+                    resize: Increase,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3300,9 +3461,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Tmux,
-                ),
+                SwitchToMode {
+                    input_mode: Tmux,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3312,9 +3473,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3334,9 +3495,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Locked,
-                ),
+                SwitchToMode {
+                    input_mode: Locked,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3346,9 +3507,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Move,
-                ),
+                SwitchToMode {
+                    input_mode: Move,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3358,9 +3519,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Left,
-                ),
+                MoveFocusOrTab {
+                    direction: Left,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3370,9 +3531,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveTab(
-                    Left,
-                ),
+                MoveTab {
+                    direction: Left,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3382,9 +3543,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Down,
-                ),
+                MoveFocus {
+                    direction: Down,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3394,9 +3555,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Up,
-                ),
+                MoveFocus {
+                    direction: Up,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3406,9 +3567,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Right,
-                ),
+                MoveFocusOrTab {
+                    direction: Right,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3418,9 +3579,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Resize,
-                ),
+                SwitchToMode {
+                    input_mode: Resize,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3430,11 +3591,11 @@ Config {
                     Alt,
                 },
             }: [
-                NewPane(
-                    None,
-                    None,
-                    false,
-                ),
+                NewPane {
+                    direction: None,
+                    pane_name: None,
+                    start_suppressed: false,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3444,9 +3605,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Session,
-                ),
+                SwitchToMode {
+                    input_mode: Session,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3456,9 +3617,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveTab(
-                    Right,
-                ),
+                MoveTab {
+                    direction: Right,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3468,9 +3629,30 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Pane,
+                SwitchToMode {
+                    input_mode: Pane,
+                },
+            ],
+            KeyWithModifier {
+                bare_key: Char(
+                    'p',
                 ),
+                key_modifiers: {
+                    Alt,
+                },
+            }: [
+                TogglePaneInGroup,
+            ],
+            KeyWithModifier {
+                bare_key: Char(
+                    'p',
+                ),
+                key_modifiers: {
+                    Alt,
+                    Shift,
+                },
+            }: [
+                ToggleGroupMarking,
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3490,9 +3672,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Scroll,
-                ),
+                SwitchToMode {
+                    input_mode: Scroll,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3502,26 +3684,26 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Tab,
-                ),
+                SwitchToMode {
+                    input_mode: Tab,
+                },
             ],
             KeyWithModifier {
                 bare_key: Esc,
                 key_modifiers: {},
             }: [
                 UndoRenameTab,
-                SwitchToMode(
-                    Tab,
-                ),
+                SwitchToMode {
+                    input_mode: Tab,
+                },
             ],
             KeyWithModifier {
                 bare_key: Enter,
                 key_modifiers: {},
             }: [
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
         },
         RenamePane: {
@@ -3531,9 +3713,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Left,
-                ),
+                MoveFocusOrTab {
+                    direction: Left,
+                },
             ],
             KeyWithModifier {
                 bare_key: Down,
@@ -3541,9 +3723,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Down,
-                ),
+                MoveFocus {
+                    direction: Down,
+                },
             ],
             KeyWithModifier {
                 bare_key: Up,
@@ -3551,9 +3733,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Up,
-                ),
+                MoveFocus {
+                    direction: Up,
+                },
             ],
             KeyWithModifier {
                 bare_key: Right,
@@ -3561,9 +3743,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Right,
-                ),
+                MoveFocusOrTab {
+                    direction: Right,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3573,10 +3755,10 @@ Config {
                     Alt,
                 },
             }: [
-                Resize(
-                    Increase,
-                    None,
-                ),
+                Resize {
+                    resize: Increase,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3586,10 +3768,10 @@ Config {
                     Alt,
                 },
             }: [
-                Resize(
-                    Decrease,
-                    None,
-                ),
+                Resize {
+                    resize: Decrease,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3599,10 +3781,10 @@ Config {
                     Alt,
                 },
             }: [
-                Resize(
-                    Increase,
-                    None,
-                ),
+                Resize {
+                    resize: Increase,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3632,9 +3814,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Tmux,
-                ),
+                SwitchToMode {
+                    input_mode: Tmux,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3644,9 +3826,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3666,9 +3848,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Locked,
-                ),
+                SwitchToMode {
+                    input_mode: Locked,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3678,9 +3860,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Move,
-                ),
+                SwitchToMode {
+                    input_mode: Move,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3690,9 +3872,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Left,
-                ),
+                MoveFocusOrTab {
+                    direction: Left,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3702,9 +3884,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveTab(
-                    Left,
-                ),
+                MoveTab {
+                    direction: Left,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3714,9 +3896,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Down,
-                ),
+                MoveFocus {
+                    direction: Down,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3726,9 +3908,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Up,
-                ),
+                MoveFocus {
+                    direction: Up,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3738,9 +3920,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Right,
-                ),
+                MoveFocusOrTab {
+                    direction: Right,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3750,9 +3932,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Resize,
-                ),
+                SwitchToMode {
+                    input_mode: Resize,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3762,11 +3944,11 @@ Config {
                     Alt,
                 },
             }: [
-                NewPane(
-                    None,
-                    None,
-                    false,
-                ),
+                NewPane {
+                    direction: None,
+                    pane_name: None,
+                    start_suppressed: false,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3776,9 +3958,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Session,
-                ),
+                SwitchToMode {
+                    input_mode: Session,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3788,9 +3970,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveTab(
-                    Right,
-                ),
+                MoveTab {
+                    direction: Right,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3800,9 +3982,30 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Pane,
+                SwitchToMode {
+                    input_mode: Pane,
+                },
+            ],
+            KeyWithModifier {
+                bare_key: Char(
+                    'p',
                 ),
+                key_modifiers: {
+                    Alt,
+                },
+            }: [
+                TogglePaneInGroup,
+            ],
+            KeyWithModifier {
+                bare_key: Char(
+                    'p',
+                ),
+                key_modifiers: {
+                    Alt,
+                    Shift,
+                },
+            }: [
+                ToggleGroupMarking,
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3822,9 +4025,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Scroll,
-                ),
+                SwitchToMode {
+                    input_mode: Scroll,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3834,26 +4037,26 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Tab,
-                ),
+                SwitchToMode {
+                    input_mode: Tab,
+                },
             ],
             KeyWithModifier {
                 bare_key: Esc,
                 key_modifiers: {},
             }: [
                 UndoRenamePane,
-                SwitchToMode(
-                    Pane,
-                ),
+                SwitchToMode {
+                    input_mode: Pane,
+                },
             ],
             KeyWithModifier {
                 bare_key: Enter,
                 key_modifiers: {},
             }: [
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
         },
         Session: {
@@ -3863,9 +4066,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Left,
-                ),
+                MoveFocusOrTab {
+                    direction: Left,
+                },
             ],
             KeyWithModifier {
                 bare_key: Down,
@@ -3873,9 +4076,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Down,
-                ),
+                MoveFocus {
+                    direction: Down,
+                },
             ],
             KeyWithModifier {
                 bare_key: Up,
@@ -3883,9 +4086,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Up,
-                ),
+                MoveFocus {
+                    direction: Up,
+                },
             ],
             KeyWithModifier {
                 bare_key: Right,
@@ -3893,9 +4096,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Right,
-                ),
+                MoveFocusOrTab {
+                    direction: Right,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3905,10 +4108,10 @@ Config {
                     Alt,
                 },
             }: [
-                Resize(
-                    Increase,
-                    None,
-                ),
+                Resize {
+                    resize: Increase,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3918,10 +4121,10 @@ Config {
                     Alt,
                 },
             }: [
-                Resize(
-                    Decrease,
-                    None,
-                ),
+                Resize {
+                    resize: Decrease,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3931,10 +4134,10 @@ Config {
                     Alt,
                 },
             }: [
-                Resize(
-                    Increase,
-                    None,
-                ),
+                Resize {
+                    resize: Increase,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3962,8 +4165,8 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                LaunchOrFocusPlugin(
-                    RunPlugin(
+                LaunchOrFocusPlugin {
+                    plugin: RunPlugin(
                         RunPlugin {
                             _allow_exec_host_cmd: false,
                             location: Zellij(
@@ -3977,14 +4180,14 @@ Config {
                             initial_cwd: None,
                         },
                     ),
-                    true,
-                    true,
-                    false,
-                    false,
-                ),
-                SwitchToMode(
-                    Normal,
-                ),
+                    should_float: true,
+                    move_to_focused_tab: true,
+                    should_open_in_place: false,
+                    skip_cache: false,
+                },
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -3994,9 +4197,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Tmux,
-                ),
+                SwitchToMode {
+                    input_mode: Tmux,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4004,8 +4207,8 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                LaunchOrFocusPlugin(
-                    Alias(
+                LaunchOrFocusPlugin {
+                    plugin: Alias(
                         PluginAlias {
                             name: "configuration",
                             configuration: Some(
@@ -4017,14 +4220,14 @@ Config {
                             run_plugin: None,
                         },
                     ),
-                    true,
-                    true,
-                    false,
-                    false,
-                ),
-                SwitchToMode(
-                    Normal,
-                ),
+                    should_float: true,
+                    move_to_focused_tab: true,
+                    should_open_in_place: false,
+                    skip_cache: false,
+                },
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4052,9 +4255,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Locked,
-                ),
+                SwitchToMode {
+                    input_mode: Locked,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4064,9 +4267,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Move,
-                ),
+                SwitchToMode {
+                    input_mode: Move,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4076,9 +4279,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Left,
-                ),
+                MoveFocusOrTab {
+                    direction: Left,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4088,9 +4291,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveTab(
-                    Left,
-                ),
+                MoveTab {
+                    direction: Left,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4100,9 +4303,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Down,
-                ),
+                MoveFocus {
+                    direction: Down,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4112,9 +4315,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Up,
-                ),
+                MoveFocus {
+                    direction: Up,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4124,9 +4327,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Right,
-                ),
+                MoveFocusOrTab {
+                    direction: Right,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4136,9 +4339,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Resize,
-                ),
+                SwitchToMode {
+                    input_mode: Resize,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4148,11 +4351,11 @@ Config {
                     Alt,
                 },
             }: [
-                NewPane(
-                    None,
-                    None,
-                    false,
-                ),
+                NewPane {
+                    direction: None,
+                    pane_name: None,
+                    start_suppressed: false,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4162,9 +4365,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4174,9 +4377,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveTab(
-                    Right,
-                ),
+                MoveTab {
+                    direction: Right,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4184,8 +4387,8 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                LaunchOrFocusPlugin(
-                    Alias(
+                LaunchOrFocusPlugin {
+                    plugin: Alias(
                         PluginAlias {
                             name: "plugin-manager",
                             configuration: Some(
@@ -4197,14 +4400,14 @@ Config {
                             run_plugin: None,
                         },
                     ),
-                    true,
-                    true,
-                    false,
-                    false,
-                ),
-                SwitchToMode(
-                    Normal,
-                ),
+                    should_float: true,
+                    move_to_focused_tab: true,
+                    should_open_in_place: false,
+                    skip_cache: false,
+                },
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4214,9 +4417,30 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Pane,
+                SwitchToMode {
+                    input_mode: Pane,
+                },
+            ],
+            KeyWithModifier {
+                bare_key: Char(
+                    'p',
                 ),
+                key_modifiers: {
+                    Alt,
+                },
+            }: [
+                TogglePaneInGroup,
+            ],
+            KeyWithModifier {
+                bare_key: Char(
+                    'p',
+                ),
+                key_modifiers: {
+                    Alt,
+                    Shift,
+                },
+            }: [
+                ToggleGroupMarking,
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4232,13 +4456,43 @@ Config {
                 bare_key: Char(
                     's',
                 ),
+                key_modifiers: {},
+            }: [
+                LaunchOrFocusPlugin {
+                    plugin: RunPlugin(
+                        RunPlugin {
+                            _allow_exec_host_cmd: false,
+                            location: Zellij(
+                                PluginTag(
+                                    "share",
+                                ),
+                            ),
+                            configuration: PluginUserConfiguration(
+                                {},
+                            ),
+                            initial_cwd: None,
+                        },
+                    ),
+                    should_float: true,
+                    move_to_focused_tab: true,
+                    should_open_in_place: false,
+                    skip_cache: false,
+                },
+                SwitchToMode {
+                    input_mode: Normal,
+                },
+            ],
+            KeyWithModifier {
+                bare_key: Char(
+                    's',
+                ),
                 key_modifiers: {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Scroll,
-                ),
+                SwitchToMode {
+                    input_mode: Scroll,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4248,9 +4502,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Tab,
-                ),
+                SwitchToMode {
+                    input_mode: Tab,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4258,8 +4512,8 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                LaunchOrFocusPlugin(
-                    Alias(
+                LaunchOrFocusPlugin {
+                    plugin: Alias(
                         PluginAlias {
                             name: "session-manager",
                             configuration: Some(
@@ -4271,30 +4525,30 @@ Config {
                             run_plugin: None,
                         },
                     ),
-                    true,
-                    true,
-                    false,
-                    false,
-                ),
-                SwitchToMode(
-                    Normal,
-                ),
+                    should_float: true,
+                    move_to_focused_tab: true,
+                    should_open_in_place: false,
+                    skip_cache: false,
+                },
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Esc,
                 key_modifiers: {},
             }: [
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Enter,
                 key_modifiers: {},
             }: [
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
         },
         Move: {
@@ -4302,11 +4556,11 @@ Config {
                 bare_key: Left,
                 key_modifiers: {},
             }: [
-                MovePane(
-                    Some(
+                MovePane {
+                    direction: Some(
                         Left,
                     ),
-                ),
+                },
             ],
             KeyWithModifier {
                 bare_key: Left,
@@ -4314,19 +4568,19 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Left,
-                ),
+                MoveFocusOrTab {
+                    direction: Left,
+                },
             ],
             KeyWithModifier {
                 bare_key: Down,
                 key_modifiers: {},
             }: [
-                MovePane(
-                    Some(
+                MovePane {
+                    direction: Some(
                         Down,
                     ),
-                ),
+                },
             ],
             KeyWithModifier {
                 bare_key: Down,
@@ -4334,19 +4588,19 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Down,
-                ),
+                MoveFocus {
+                    direction: Down,
+                },
             ],
             KeyWithModifier {
                 bare_key: Up,
                 key_modifiers: {},
             }: [
-                MovePane(
-                    Some(
+                MovePane {
+                    direction: Some(
                         Up,
                     ),
-                ),
+                },
             ],
             KeyWithModifier {
                 bare_key: Up,
@@ -4354,19 +4608,19 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Up,
-                ),
+                MoveFocus {
+                    direction: Up,
+                },
             ],
             KeyWithModifier {
                 bare_key: Right,
                 key_modifiers: {},
             }: [
-                MovePane(
-                    Some(
+                MovePane {
+                    direction: Some(
                         Right,
                     ),
-                ),
+                },
             ],
             KeyWithModifier {
                 bare_key: Right,
@@ -4374,9 +4628,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Right,
-                ),
+                MoveFocusOrTab {
+                    direction: Right,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4386,10 +4640,10 @@ Config {
                     Alt,
                 },
             }: [
-                Resize(
-                    Increase,
-                    None,
-                ),
+                Resize {
+                    resize: Increase,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4399,10 +4653,10 @@ Config {
                     Alt,
                 },
             }: [
-                Resize(
-                    Decrease,
-                    None,
-                ),
+                Resize {
+                    resize: Decrease,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4412,10 +4666,10 @@ Config {
                     Alt,
                 },
             }: [
-                Resize(
-                    Increase,
-                    None,
-                ),
+                Resize {
+                    resize: Increase,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4445,9 +4699,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Tmux,
-                ),
+                SwitchToMode {
+                    input_mode: Tmux,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4467,9 +4721,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Locked,
-                ),
+                SwitchToMode {
+                    input_mode: Locked,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4477,11 +4731,11 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                MovePane(
-                    Some(
+                MovePane {
+                    direction: Some(
                         Left,
                     ),
-                ),
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4491,9 +4745,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4503,9 +4757,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Left,
-                ),
+                MoveFocusOrTab {
+                    direction: Left,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4515,9 +4769,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveTab(
-                    Left,
-                ),
+                MoveTab {
+                    direction: Left,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4525,11 +4779,11 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                MovePane(
-                    Some(
+                MovePane {
+                    direction: Some(
                         Down,
                     ),
-                ),
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4539,9 +4793,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Down,
-                ),
+                MoveFocus {
+                    direction: Down,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4549,11 +4803,11 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                MovePane(
-                    Some(
+                MovePane {
+                    direction: Some(
                         Up,
                     ),
-                ),
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4563,9 +4817,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Up,
-                ),
+                MoveFocus {
+                    direction: Up,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4573,11 +4827,11 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                MovePane(
-                    Some(
+                MovePane {
+                    direction: Some(
                         Right,
                     ),
-                ),
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4587,9 +4841,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Right,
-                ),
+                MoveFocusOrTab {
+                    direction: Right,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4597,9 +4851,9 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                MovePane(
-                    None,
-                ),
+                MovePane {
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4609,9 +4863,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Resize,
-                ),
+                SwitchToMode {
+                    input_mode: Resize,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4621,11 +4875,11 @@ Config {
                     Alt,
                 },
             }: [
-                NewPane(
-                    None,
-                    None,
-                    false,
-                ),
+                NewPane {
+                    direction: None,
+                    pane_name: None,
+                    start_suppressed: false,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4635,9 +4889,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Session,
-                ),
+                SwitchToMode {
+                    input_mode: Session,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4647,9 +4901,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveTab(
-                    Right,
-                ),
+                MoveTab {
+                    direction: Right,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4667,9 +4921,30 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Pane,
+                SwitchToMode {
+                    input_mode: Pane,
+                },
+            ],
+            KeyWithModifier {
+                bare_key: Char(
+                    'p',
                 ),
+                key_modifiers: {
+                    Alt,
+                },
+            }: [
+                TogglePaneInGroup,
+            ],
+            KeyWithModifier {
+                bare_key: Char(
+                    'p',
+                ),
+                key_modifiers: {
+                    Alt,
+                    Shift,
+                },
+            }: [
+                ToggleGroupMarking,
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4689,9 +4964,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Scroll,
-                ),
+                SwitchToMode {
+                    input_mode: Scroll,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4701,33 +4976,33 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Tab,
-                ),
+                SwitchToMode {
+                    input_mode: Tab,
+                },
             ],
             KeyWithModifier {
                 bare_key: Tab,
                 key_modifiers: {},
             }: [
-                MovePane(
-                    None,
-                ),
+                MovePane {
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Esc,
                 key_modifiers: {},
             }: [
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Enter,
                 key_modifiers: {},
             }: [
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
         },
         Prompt: {
@@ -4737,9 +5012,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Left,
-                ),
+                MoveFocusOrTab {
+                    direction: Left,
+                },
             ],
             KeyWithModifier {
                 bare_key: Down,
@@ -4747,9 +5022,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Down,
-                ),
+                MoveFocus {
+                    direction: Down,
+                },
             ],
             KeyWithModifier {
                 bare_key: Up,
@@ -4757,9 +5032,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Up,
-                ),
+                MoveFocus {
+                    direction: Up,
+                },
             ],
             KeyWithModifier {
                 bare_key: Right,
@@ -4767,9 +5042,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Right,
-                ),
+                MoveFocusOrTab {
+                    direction: Right,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4779,10 +5054,10 @@ Config {
                     Alt,
                 },
             }: [
-                Resize(
-                    Increase,
-                    None,
-                ),
+                Resize {
+                    resize: Increase,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4792,10 +5067,10 @@ Config {
                     Alt,
                 },
             }: [
-                Resize(
-                    Decrease,
-                    None,
-                ),
+                Resize {
+                    resize: Decrease,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4805,10 +5080,10 @@ Config {
                     Alt,
                 },
             }: [
-                Resize(
-                    Increase,
-                    None,
-                ),
+                Resize {
+                    resize: Increase,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4838,9 +5113,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Tmux,
-                ),
+                SwitchToMode {
+                    input_mode: Tmux,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4860,9 +5135,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Locked,
-                ),
+                SwitchToMode {
+                    input_mode: Locked,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4872,9 +5147,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Move,
-                ),
+                SwitchToMode {
+                    input_mode: Move,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4884,9 +5159,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Left,
-                ),
+                MoveFocusOrTab {
+                    direction: Left,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4896,9 +5171,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveTab(
-                    Left,
-                ),
+                MoveTab {
+                    direction: Left,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4908,9 +5183,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Down,
-                ),
+                MoveFocus {
+                    direction: Down,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4920,9 +5195,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Up,
-                ),
+                MoveFocus {
+                    direction: Up,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4932,9 +5207,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Right,
-                ),
+                MoveFocusOrTab {
+                    direction: Right,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4944,9 +5219,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Resize,
-                ),
+                SwitchToMode {
+                    input_mode: Resize,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4956,11 +5231,11 @@ Config {
                     Alt,
                 },
             }: [
-                NewPane(
-                    None,
-                    None,
-                    false,
-                ),
+                NewPane {
+                    direction: None,
+                    pane_name: None,
+                    start_suppressed: false,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4970,9 +5245,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Session,
-                ),
+                SwitchToMode {
+                    input_mode: Session,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4982,9 +5257,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveTab(
-                    Right,
-                ),
+                MoveTab {
+                    direction: Right,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -4994,9 +5269,30 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Pane,
+                SwitchToMode {
+                    input_mode: Pane,
+                },
+            ],
+            KeyWithModifier {
+                bare_key: Char(
+                    'p',
                 ),
+                key_modifiers: {
+                    Alt,
+                },
+            }: [
+                TogglePaneInGroup,
+            ],
+            KeyWithModifier {
+                bare_key: Char(
+                    'p',
+                ),
+                key_modifiers: {
+                    Alt,
+                    Shift,
+                },
+            }: [
+                ToggleGroupMarking,
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -5016,9 +5312,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Scroll,
-                ),
+                SwitchToMode {
+                    input_mode: Scroll,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -5028,25 +5324,25 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Tab,
-                ),
+                SwitchToMode {
+                    input_mode: Tab,
+                },
             ],
             KeyWithModifier {
                 bare_key: Esc,
                 key_modifiers: {},
             }: [
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Enter,
                 key_modifiers: {},
             }: [
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
         },
         Tmux: {
@@ -5054,12 +5350,12 @@ Config {
                 bare_key: Left,
                 key_modifiers: {},
             }: [
-                MoveFocus(
-                    Left,
-                ),
-                SwitchToMode(
-                    Normal,
-                ),
+                MoveFocus {
+                    direction: Left,
+                },
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Left,
@@ -5067,20 +5363,20 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Left,
-                ),
+                MoveFocusOrTab {
+                    direction: Left,
+                },
             ],
             KeyWithModifier {
                 bare_key: Down,
                 key_modifiers: {},
             }: [
-                MoveFocus(
-                    Down,
-                ),
-                SwitchToMode(
-                    Normal,
-                ),
+                MoveFocus {
+                    direction: Down,
+                },
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Down,
@@ -5088,20 +5384,20 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Down,
-                ),
+                MoveFocus {
+                    direction: Down,
+                },
             ],
             KeyWithModifier {
                 bare_key: Up,
                 key_modifiers: {},
             }: [
-                MoveFocus(
-                    Up,
-                ),
-                SwitchToMode(
-                    Normal,
-                ),
+                MoveFocus {
+                    direction: Up,
+                },
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Up,
@@ -5109,20 +5405,20 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Up,
-                ),
+                MoveFocus {
+                    direction: Up,
+                },
             ],
             KeyWithModifier {
                 bare_key: Right,
                 key_modifiers: {},
             }: [
-                MoveFocus(
-                    Right,
-                ),
-                SwitchToMode(
-                    Normal,
-                ),
+                MoveFocus {
+                    direction: Right,
+                },
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Right,
@@ -5130,9 +5426,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Right,
-                ),
+                MoveFocusOrTab {
+                    direction: Right,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -5148,16 +5444,16 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                NewPane(
-                    Some(
+                NewPane {
+                    direction: Some(
                         Down,
                     ),
-                    None,
-                    false,
-                ),
-                SwitchToMode(
-                    Normal,
-                ),
+                    pane_name: None,
+                    start_suppressed: false,
+                },
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -5165,16 +5461,16 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                NewPane(
-                    Some(
+                NewPane {
+                    direction: Some(
                         Right,
                     ),
-                    None,
-                    false,
-                ),
-                SwitchToMode(
-                    Normal,
-                ),
+                    pane_name: None,
+                    start_suppressed: false,
+                },
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -5184,10 +5480,10 @@ Config {
                     Alt,
                 },
             }: [
-                Resize(
-                    Increase,
-                    None,
-                ),
+                Resize {
+                    resize: Increase,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -5195,9 +5491,9 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                SwitchToMode(
-                    RenameTab,
-                ),
+                SwitchToMode {
+                    input_mode: RenameTab,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -5207,10 +5503,10 @@ Config {
                     Alt,
                 },
             }: [
-                Resize(
-                    Decrease,
-                    None,
-                ),
+                Resize {
+                    resize: Decrease,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -5220,10 +5516,10 @@ Config {
                     Alt,
                 },
             }: [
-                Resize(
-                    Increase,
-                    None,
-                ),
+                Resize {
+                    resize: Increase,
+                    direction: None,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -5231,9 +5527,9 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                SwitchToMode(
-                    Scroll,
-                ),
+                SwitchToMode {
+                    input_mode: Scroll,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -5263,16 +5559,16 @@ Config {
                     Ctrl,
                 },
             }: [
-                Write(
-                    None,
-                    [
+                Write {
+                    key_with_modifier: None,
+                    bytes: [
                         2,
                     ],
-                    false,
-                ),
-                SwitchToMode(
-                    Normal,
-                ),
+                    is_kitty_keyboard_protocol: false,
+                },
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -5280,17 +5576,18 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                NewTab(
-                    None,
-                    [],
-                    None,
-                    None,
-                    None,
-                    true,
-                ),
-                SwitchToMode(
-                    Normal,
-                ),
+                NewTab {
+                    tiled_layout: None,
+                    floating_layouts: [],
+                    swap_tiled_layouts: None,
+                    swap_floating_layouts: None,
+                    tab_name: None,
+                    should_change_focus_to_new_tab: true,
+                    cwd: None,
+                },
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -5318,9 +5615,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Locked,
-                ),
+                SwitchToMode {
+                    input_mode: Locked,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -5328,12 +5625,12 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                MoveFocus(
-                    Left,
-                ),
-                SwitchToMode(
-                    Normal,
-                ),
+                MoveFocus {
+                    direction: Left,
+                },
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -5343,9 +5640,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Move,
-                ),
+                SwitchToMode {
+                    input_mode: Move,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -5355,9 +5652,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Left,
-                ),
+                MoveFocusOrTab {
+                    direction: Left,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -5367,9 +5664,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveTab(
-                    Left,
-                ),
+                MoveTab {
+                    direction: Left,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -5377,12 +5674,12 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                MoveFocus(
-                    Down,
-                ),
-                SwitchToMode(
-                    Normal,
-                ),
+                MoveFocus {
+                    direction: Down,
+                },
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -5392,9 +5689,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Down,
-                ),
+                MoveFocus {
+                    direction: Down,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -5402,12 +5699,12 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                MoveFocus(
-                    Up,
-                ),
-                SwitchToMode(
-                    Normal,
-                ),
+                MoveFocus {
+                    direction: Up,
+                },
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -5417,9 +5714,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocus(
-                    Up,
-                ),
+                MoveFocus {
+                    direction: Up,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -5427,12 +5724,12 @@ Config {
                 ),
                 key_modifiers: {},
             }: [
-                MoveFocus(
-                    Right,
-                ),
-                SwitchToMode(
-                    Normal,
-                ),
+                MoveFocus {
+                    direction: Right,
+                },
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -5442,9 +5739,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveFocusOrTab(
-                    Right,
-                ),
+                MoveFocusOrTab {
+                    direction: Right,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -5453,9 +5750,9 @@ Config {
                 key_modifiers: {},
             }: [
                 GoToNextTab,
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -5465,9 +5762,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Resize,
-                ),
+                SwitchToMode {
+                    input_mode: Resize,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -5477,11 +5774,11 @@ Config {
                     Alt,
                 },
             }: [
-                NewPane(
-                    None,
-                    None,
-                    false,
-                ),
+                NewPane {
+                    direction: None,
+                    pane_name: None,
+                    start_suppressed: false,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -5499,9 +5796,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Session,
-                ),
+                SwitchToMode {
+                    input_mode: Session,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -5511,9 +5808,9 @@ Config {
                     Alt,
                 },
             }: [
-                MoveTab(
-                    Right,
-                ),
+                MoveTab {
+                    direction: Right,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -5522,9 +5819,9 @@ Config {
                 key_modifiers: {},
             }: [
                 GoToPreviousTab,
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -5534,9 +5831,30 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Pane,
+                SwitchToMode {
+                    input_mode: Pane,
+                },
+            ],
+            KeyWithModifier {
+                bare_key: Char(
+                    'p',
                 ),
+                key_modifiers: {
+                    Alt,
+                },
+            }: [
+                TogglePaneInGroup,
+            ],
+            KeyWithModifier {
+                bare_key: Char(
+                    'p',
+                ),
+                key_modifiers: {
+                    Alt,
+                    Shift,
+                },
+            }: [
+                ToggleGroupMarking,
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -5556,9 +5874,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Scroll,
-                ),
+                SwitchToMode {
+                    input_mode: Scroll,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -5568,9 +5886,9 @@ Config {
                     Ctrl,
                 },
             }: [
-                SwitchToMode(
-                    Tab,
-                ),
+                SwitchToMode {
+                    input_mode: Tab,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -5579,9 +5897,9 @@ Config {
                 key_modifiers: {},
             }: [
                 CloseFocus,
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Char(
@@ -5590,25 +5908,25 @@ Config {
                 key_modifiers: {},
             }: [
                 ToggleFocusFullscreen,
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Esc,
                 key_modifiers: {},
             }: [
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
             KeyWithModifier {
                 bare_key: Enter,
                 key_modifiers: {},
             }: [
-                SwitchToMode(
-                    Normal,
-                ),
+                SwitchToMode {
+                    input_mode: Normal,
+                },
             ],
         },
     },
@@ -5640,9 +5958,18 @@ Config {
         serialization_interval: None,
         disable_session_metadata: None,
         support_kitty_keyboard_protocol: None,
+        web_server: None,
+        web_sharing: None,
         stacked_resize: None,
         show_startup_tips: None,
         show_release_notes: None,
+        advanced_mouse_actions: None,
+        web_server_ip: None,
+        web_server_port: None,
+        web_server_cert: None,
+        web_server_key: None,
+        enforce_https_for_localhost: None,
+        post_command_discovery_hook: None,
     },
     themes: {},
     plugins: PluginAliases {
@@ -5781,4 +6108,12 @@ Config {
     },
     env: {},
     background_plugins: {},
+    web_client: WebClientConfig {
+        font: "monospace",
+        theme: None,
+        cursor_blink: false,
+        cursor_inactive_style: None,
+        cursor_style: None,
+        mac_option_is_meta: true,
+    },
 }

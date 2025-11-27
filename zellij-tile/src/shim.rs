@@ -8,11 +8,15 @@ use zellij_utils::data::*;
 use zellij_utils::errors::prelude::*;
 use zellij_utils::input::actions::Action;
 pub use zellij_utils::plugin_api;
-use zellij_utils::plugin_api::plugin_command::ProtobufPluginCommand;
+use zellij_utils::plugin_api::event::ProtobufPaneScrollbackResponse;
+use zellij_utils::plugin_api::plugin_command::{
+    CreateTokenResponse, ListTokensResponse, ProtobufPluginCommand, RenameWebTokenResponse,
+    RevokeAllWebTokensResponse, RevokeTokenResponse,
+};
 use zellij_utils::plugin_api::plugin_ids::{ProtobufPluginIds, ProtobufZellijVersion};
 
 pub use super::ui_components::*;
-pub use zellij_utils::prost::{self, *};
+pub use prost::{self, *};
 
 // Subscription Handling
 
@@ -431,8 +435,13 @@ pub fn new_tabs_with_layout_info(layout_info: LayoutInfo) {
 }
 
 /// Open a new tab with the default layout
-pub fn new_tab() {
-    let plugin_command = PluginCommand::NewTab;
+pub fn new_tab<S: AsRef<str>>(name: Option<S>, cwd: Option<S>)
+where
+    S: ToString,
+{
+    let name = name.map(|s| s.to_string());
+    let cwd = cwd.map(|s| s.to_string());
+    let plugin_command = PluginCommand::NewTab { name, cwd };
     let protobuf_plugin_command: ProtobufPluginCommand = plugin_command.try_into().unwrap();
     object_to_stdout(&protobuf_plugin_command.encode_to_vec());
     unsafe { host_run_plugin_command() };
@@ -1037,6 +1046,46 @@ pub fn edit_scrollback_for_pane_with_id(pane_id: PaneId) {
     unsafe { host_run_plugin_command() };
 }
 
+/// Retrieves the scrollback contents from the specified pane
+///
+/// # Arguments
+/// * `pane_id` - The ID of the pane to get scrollback from
+/// * `get_full_scrollback` - Whether to retrieve the full scrollback buffer (including lines above and below viewport)
+///
+/// # Returns
+/// * `Ok(PaneContents)` - The pane contents if successful
+/// * `Err(String)` - An error message if the pane was not found, timed out, or another error occurred
+pub fn get_pane_scrollback(
+    pane_id: PaneId,
+    get_full_scrollback: bool,
+) -> Result<PaneContents, String> {
+    let plugin_command = PluginCommand::GetPaneScrollback {
+        pane_id,
+        get_full_scrollback,
+    };
+    let protobuf_plugin_command: ProtobufPluginCommand = plugin_command.try_into().unwrap();
+    object_to_stdout(&protobuf_plugin_command.encode_to_vec());
+    unsafe { host_run_plugin_command() };
+
+    // Read response from stdin
+    let response_bytes =
+        bytes_from_stdin().map_err(|e| format!("Failed to read response from stdin: {:?}", e))?;
+
+    // Decode protobuf response
+    let protobuf_response = ProtobufPaneScrollbackResponse::decode(response_bytes.as_slice())
+        .map_err(|e| format!("Failed to decode protobuf response: {}", e))?;
+
+    // Convert to Rust type
+    let response = PaneScrollbackResponse::try_from(protobuf_response)
+        .map_err(|e| format!("Failed to convert protobuf response: {}", e))?;
+
+    // Convert Result enum to actual Result type
+    match response {
+        PaneScrollbackResponse::Ok(contents) => Ok(contents),
+        PaneScrollbackResponse::Err(error_msg) => Err(error_msg),
+    }
+}
+
 /// Write bytes to the `STDIN` of the specified pane
 pub fn write_to_pane_id(bytes: Vec<u8>, pane_id: PaneId) {
     let plugin_command = PluginCommand::WriteToPaneId(bytes, pane_id);
@@ -1183,7 +1232,7 @@ pub fn break_panes_to_new_tab(
     unsafe { host_run_plugin_command() };
 }
 
-/// Create a new tab that includes the specified pane ids
+/// Move the pane ids to the tab with the specified index
 pub fn break_panes_to_tab_with_index(
     pane_ids: &[PaneId],
     tab_index: usize,
@@ -1268,6 +1317,196 @@ pub fn change_floating_panes_coordinates(
     pane_ids_and_coordinates: Vec<(PaneId, FloatingPaneCoordinates)>,
 ) {
     let plugin_command = PluginCommand::ChangeFloatingPanesCoordinates(pane_ids_and_coordinates);
+    let protobuf_plugin_command: ProtobufPluginCommand = plugin_command.try_into().unwrap();
+    object_to_stdout(&protobuf_plugin_command.encode_to_vec());
+    unsafe { host_run_plugin_command() };
+}
+
+pub fn start_web_server() {
+    let plugin_command = PluginCommand::StartWebServer;
+    let protobuf_plugin_command: ProtobufPluginCommand = plugin_command.try_into().unwrap();
+    object_to_stdout(&protobuf_plugin_command.encode_to_vec());
+    unsafe { host_run_plugin_command() };
+}
+
+pub fn stop_web_server() {
+    let plugin_command = PluginCommand::StopWebServer;
+    let protobuf_plugin_command: ProtobufPluginCommand = plugin_command.try_into().unwrap();
+    object_to_stdout(&protobuf_plugin_command.encode_to_vec());
+    unsafe { host_run_plugin_command() };
+}
+
+pub fn query_web_server_status() {
+    let plugin_command = PluginCommand::QueryWebServerStatus;
+    let protobuf_plugin_command: ProtobufPluginCommand = plugin_command.try_into().unwrap();
+    object_to_stdout(&protobuf_plugin_command.encode_to_vec());
+    unsafe { host_run_plugin_command() };
+}
+
+pub fn share_current_session() {
+    let plugin_command = PluginCommand::ShareCurrentSession;
+    let protobuf_plugin_command: ProtobufPluginCommand = plugin_command.try_into().unwrap();
+    object_to_stdout(&protobuf_plugin_command.encode_to_vec());
+    unsafe { host_run_plugin_command() };
+}
+
+pub fn stop_sharing_current_session() {
+    let plugin_command = PluginCommand::StopSharingCurrentSession;
+    let protobuf_plugin_command: ProtobufPluginCommand = plugin_command.try_into().unwrap();
+    object_to_stdout(&protobuf_plugin_command.encode_to_vec());
+    unsafe { host_run_plugin_command() };
+}
+
+pub fn group_and_ungroup_panes(
+    pane_ids_to_group: Vec<PaneId>,
+    pane_ids_to_ungroup: Vec<PaneId>,
+    for_all_clients: bool,
+) {
+    let plugin_command = PluginCommand::GroupAndUngroupPanes(
+        pane_ids_to_group,
+        pane_ids_to_ungroup,
+        for_all_clients,
+    );
+    let protobuf_plugin_command: ProtobufPluginCommand = plugin_command.try_into().unwrap();
+    object_to_stdout(&protobuf_plugin_command.encode_to_vec());
+    unsafe { host_run_plugin_command() };
+}
+
+pub fn highlight_and_unhighlight_panes(
+    pane_ids_to_highlight: Vec<PaneId>,
+    pane_ids_to_unhighlight: Vec<PaneId>,
+) {
+    let plugin_command =
+        PluginCommand::HighlightAndUnhighlightPanes(pane_ids_to_highlight, pane_ids_to_unhighlight);
+    let protobuf_plugin_command: ProtobufPluginCommand = plugin_command.try_into().unwrap();
+    object_to_stdout(&protobuf_plugin_command.encode_to_vec());
+    unsafe { host_run_plugin_command() };
+}
+
+pub fn close_multiple_panes(pane_ids: Vec<PaneId>) {
+    let plugin_command = PluginCommand::CloseMultiplePanes(pane_ids);
+    let protobuf_plugin_command: ProtobufPluginCommand = plugin_command.try_into().unwrap();
+    object_to_stdout(&protobuf_plugin_command.encode_to_vec());
+    unsafe { host_run_plugin_command() };
+}
+
+pub fn float_multiple_panes(pane_ids: Vec<PaneId>) {
+    let plugin_command = PluginCommand::FloatMultiplePanes(pane_ids);
+    let protobuf_plugin_command: ProtobufPluginCommand = plugin_command.try_into().unwrap();
+    object_to_stdout(&protobuf_plugin_command.encode_to_vec());
+    unsafe { host_run_plugin_command() };
+}
+
+pub fn embed_multiple_panes(pane_ids: Vec<PaneId>) {
+    let plugin_command = PluginCommand::EmbedMultiplePanes(pane_ids);
+    let protobuf_plugin_command: ProtobufPluginCommand = plugin_command.try_into().unwrap();
+    object_to_stdout(&protobuf_plugin_command.encode_to_vec());
+    unsafe { host_run_plugin_command() };
+}
+
+pub fn set_self_mouse_selection_support(selection_support: bool) {
+    let plugin_command = PluginCommand::SetSelfMouseSelectionSupport(selection_support);
+    let protobuf_plugin_command: ProtobufPluginCommand = plugin_command.try_into().unwrap();
+    object_to_stdout(&protobuf_plugin_command.encode_to_vec());
+    unsafe { host_run_plugin_command() };
+}
+
+pub fn generate_web_login_token(token_label: Option<String>) -> Result<String, String> {
+    let plugin_command = PluginCommand::GenerateWebLoginToken(token_label);
+    let protobuf_plugin_command: ProtobufPluginCommand = plugin_command.try_into().unwrap();
+    object_to_stdout(&protobuf_plugin_command.encode_to_vec());
+    unsafe { host_run_plugin_command() };
+    let create_token_response =
+        CreateTokenResponse::decode(bytes_from_stdin().unwrap().as_slice()).unwrap();
+    if let Some(error) = create_token_response.error {
+        Err(error)
+    } else if let Some(token) = create_token_response.token {
+        Ok(token)
+    } else {
+        Err("Received empty response".to_owned())
+    }
+}
+
+pub fn revoke_web_login_token(token_label: &str) -> Result<(), String> {
+    let plugin_command = PluginCommand::RevokeWebLoginToken(token_label.to_owned());
+    let protobuf_plugin_command: ProtobufPluginCommand = plugin_command.try_into().unwrap();
+    object_to_stdout(&protobuf_plugin_command.encode_to_vec());
+    unsafe { host_run_plugin_command() };
+    let revoke_token_response =
+        RevokeTokenResponse::decode(bytes_from_stdin().unwrap().as_slice()).unwrap();
+    if let Some(error) = revoke_token_response.error {
+        Err(error)
+    } else {
+        Ok(())
+    }
+}
+
+pub fn list_web_login_tokens() -> Result<Vec<(String, String)>, String> {
+    // (name, created_at)
+    let plugin_command = PluginCommand::ListWebLoginTokens;
+    let protobuf_plugin_command: ProtobufPluginCommand = plugin_command.try_into().unwrap();
+    object_to_stdout(&protobuf_plugin_command.encode_to_vec());
+    unsafe { host_run_plugin_command() };
+    let list_tokens_response =
+        ListTokensResponse::decode(bytes_from_stdin().unwrap().as_slice()).unwrap();
+    if let Some(error) = list_tokens_response.error {
+        Err(error)
+    } else {
+        let tokens_and_creation_times = std::iter::zip(
+            list_tokens_response.tokens,
+            list_tokens_response.creation_times,
+        )
+        .collect();
+        Ok(tokens_and_creation_times)
+    }
+}
+
+pub fn revoke_all_web_tokens() -> Result<(), String> {
+    let plugin_command = PluginCommand::RevokeAllWebLoginTokens;
+    let protobuf_plugin_command: ProtobufPluginCommand = plugin_command.try_into().unwrap();
+    object_to_stdout(&protobuf_plugin_command.encode_to_vec());
+    unsafe { host_run_plugin_command() };
+    let revoke_all_web_tokens_response =
+        RevokeAllWebTokensResponse::decode(bytes_from_stdin().unwrap().as_slice()).unwrap();
+    if let Some(error) = revoke_all_web_tokens_response.error {
+        Err(error)
+    } else {
+        Ok(())
+    }
+}
+
+pub fn rename_web_token(old_name: &str, new_name: &str) -> Result<(), String> {
+    let plugin_command =
+        PluginCommand::RenameWebLoginToken(old_name.to_owned(), new_name.to_owned());
+    let protobuf_plugin_command: ProtobufPluginCommand = plugin_command.try_into().unwrap();
+    object_to_stdout(&protobuf_plugin_command.encode_to_vec());
+    unsafe { host_run_plugin_command() };
+    let rename_web_token_response =
+        RenameWebTokenResponse::decode(bytes_from_stdin().unwrap().as_slice()).unwrap();
+    if let Some(error) = rename_web_token_response.error {
+        Err(error)
+    } else {
+        Ok(())
+    }
+}
+
+pub fn intercept_key_presses() {
+    let plugin_command = PluginCommand::InterceptKeyPresses;
+    let protobuf_plugin_command: ProtobufPluginCommand = plugin_command.try_into().unwrap();
+    object_to_stdout(&protobuf_plugin_command.encode_to_vec());
+    unsafe { host_run_plugin_command() };
+}
+
+pub fn clear_key_presses_intercepts() {
+    let plugin_command = PluginCommand::ClearKeyPressesIntercepts;
+    let protobuf_plugin_command: ProtobufPluginCommand = plugin_command.try_into().unwrap();
+    object_to_stdout(&protobuf_plugin_command.encode_to_vec());
+    unsafe { host_run_plugin_command() };
+}
+
+pub fn replace_pane_with_existing_pane(pane_id_to_replace: PaneId, existing_pane_id: PaneId) {
+    let plugin_command =
+        PluginCommand::ReplacePaneWithExistingPane(pane_id_to_replace, existing_pane_id);
     let protobuf_plugin_command: ProtobufPluginCommand = plugin_command.try_into().unwrap();
     object_to_stdout(&protobuf_plugin_command.encode_to_vec());
     unsafe { host_run_plugin_command() };

@@ -4,8 +4,7 @@ use crate::home::find_default_config_dir;
 use directories::ProjectDirs;
 use include_dir::{include_dir, Dir};
 use lazy_static::lazy_static;
-use once_cell::sync::OnceCell;
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::OnceLock};
 use uuid::Uuid;
 
 pub const ZELLIJ_CONFIG_FILE_ENV: &str = "ZELLIJ_CONFIG_FILE";
@@ -13,13 +12,15 @@ pub const ZELLIJ_CONFIG_DIR_ENV: &str = "ZELLIJ_CONFIG_DIR";
 pub const ZELLIJ_LAYOUT_DIR_ENV: &str = "ZELLIJ_LAYOUT_DIR";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const DEFAULT_SCROLL_BUFFER_SIZE: usize = 10_000;
-pub static SCROLL_BUFFER_SIZE: OnceCell<usize> = OnceCell::new();
-pub static DEBUG_MODE: OnceCell<bool> = OnceCell::new();
+pub static SCROLL_BUFFER_SIZE: OnceLock<usize> = OnceLock::new();
+pub static DEBUG_MODE: OnceLock<bool> = OnceLock::new();
 
 pub const SYSTEM_DEFAULT_CONFIG_DIR: &str = "/etc/zellij";
 pub const SYSTEM_DEFAULT_DATA_DIR_PREFIX: &str = system_default_data_dir();
 
 pub static ZELLIJ_DEFAULT_THEMES: Dir = include_dir!("$CARGO_MANIFEST_DIR/assets/themes");
+
+pub const CLIENT_SERVER_CONTRACT_VERSION: usize = 1;
 
 pub fn session_info_cache_file_name(session_name: &str) -> PathBuf {
     session_info_folder_for_session(session_name).join("session-metadata.kdl")
@@ -58,6 +59,8 @@ const fn system_default_data_dir() -> &'static str {
 }
 
 lazy_static! {
+    pub static ref CLIENT_SERVER_CONTRACT_DIR: String =
+        format!("contract_version_{}", CLIENT_SERVER_CONTRACT_VERSION);
     pub static ref ZELLIJ_PROJ_DIR: ProjectDirs =
         ProjectDirs::from("org", "Zellij Contributors", "Zellij").unwrap();
     pub static ref ZELLIJ_CACHE_DIR: PathBuf = ZELLIJ_PROJ_DIR.cache_dir().to_path_buf();
@@ -67,8 +70,9 @@ lazy_static! {
         .join(format!("{}", Uuid::new_v4()));
     pub static ref ZELLIJ_PLUGIN_PERMISSIONS_CACHE: PathBuf =
         ZELLIJ_CACHE_DIR.join("permissions.kdl");
-    pub static ref ZELLIJ_SESSION_INFO_CACHE_DIR: PathBuf =
-        ZELLIJ_CACHE_DIR.join(VERSION).join("session_info");
+    pub static ref ZELLIJ_SESSION_INFO_CACHE_DIR: PathBuf = ZELLIJ_CACHE_DIR
+        .join(CLIENT_SERVER_CONTRACT_DIR.clone())
+        .join("session_info");
     pub static ref ZELLIJ_STDIN_CACHE_FILE: PathBuf =
         ZELLIJ_CACHE_DIR.join(VERSION).join("stdin_cache");
     pub static ref ZELLIJ_PLUGIN_ARTIFACT_DIR: PathBuf = ZELLIJ_CACHE_DIR.join(VERSION);
@@ -132,6 +136,8 @@ mod not_wasm {
             add_plugin!(assets, "configuration.wasm");
             add_plugin!(assets, "plugin-manager.wasm");
             add_plugin!(assets, "about.wasm");
+            add_plugin!(assets, "share.wasm");
+            add_plugin!(assets, "multiple-select.wasm");
             assets
         };
     }
@@ -165,8 +171,9 @@ mod unix_only {
                 },
                 PathBuf::from,
             );
-            ipc_dir.push(VERSION);
+            ipc_dir.push(CLIENT_SERVER_CONTRACT_DIR.clone());
             ipc_dir
         };
+        pub static ref WEBSERVER_SOCKET_PATH: PathBuf = ZELLIJ_SOCK_DIR.join("web_server_bus");
     }
 }

@@ -1,17 +1,22 @@
+use crate::home::default_layout_dir;
 use crate::input::actions::Action;
 use crate::input::config::ConversionError;
 use crate::input::keybinds::Keybinds;
 use crate::input::layout::{RunPlugin, SplitSize};
-use crate::shared::colors as default_colors;
+use crate::pane_size::PaneGeom;
+use crate::position::Position;
+use crate::shared::{colors as default_colors, eightbit_to_rgb};
 use clap::ArgEnum;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::fs::Metadata;
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::str::{self, FromStr};
 use std::time::Duration;
 use strum_macros::{Display, EnumDiscriminants, EnumIter, EnumString, ToString};
+use unicode_width::UnicodeWidthChar;
 
 #[cfg(not(target_family = "wasm"))]
 use termwiz::{
@@ -494,6 +499,10 @@ impl KeyWithModifier {
     pub fn is_key_with_super_modifier(&self, key: BareKey) -> bool {
         self.bare_key == key && self.key_modifiers.contains(&KeyModifier::Super)
     }
+    pub fn is_cancel_key(&self) -> bool {
+        // self.bare_key == BareKey::Esc || self.is_key_with_ctrl_modifier(BareKey::Char('c'))
+        self.bare_key == BareKey::Esc
+    }
     #[cfg(not(target_family = "wasm"))]
     pub fn to_termwiz_modifiers(&self) -> Modifiers {
         let mut modifiers = Modifiers::empty();
@@ -933,6 +942,18 @@ pub enum Event {
     FailedToChangeHostFolder(Option<String>), // String -> the error we got when changing
     PastedText(String),
     ConfigWasWrittenToDisk,
+    WebServerStatus(WebServerStatus),
+    FailedToStartWebServer(String),
+    BeforeClose,
+    InterceptedKeyPress(KeyWithModifier),
+    PaneRenderReport(HashMap<PaneId, PaneContents>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, EnumDiscriminants, ToString, Serialize, Deserialize)]
+pub enum WebServerStatus {
+    Online(String), // String -> base url
+    Offline,
+    DifferentVersion(String), // version
 }
 
 #[derive(
@@ -964,6 +985,9 @@ pub enum Permission {
     MessageAndLaunchOtherPlugins,
     Reconfigure,
     FullHdAccess,
+    StartWebServer,
+    InterceptInput,
+    ReadPaneContents,
 }
 
 impl PermissionType {
@@ -986,6 +1010,13 @@ impl PermissionType {
             },
             PermissionType::Reconfigure => "Change Zellij runtime configuration".to_owned(),
             PermissionType::FullHdAccess => "Full access to the hard-drive".to_owned(),
+            PermissionType::StartWebServer => {
+                "Start a local web server to serve Zellij sessions".to_owned()
+            },
+            PermissionType::InterceptInput => "Intercept Input (keyboard & mouse)".to_owned(),
+            PermissionType::ReadPaneContents => {
+                "Read pane contents (viewport and selection)".to_owned()
+            },
         }
     }
 }
@@ -1089,6 +1120,48 @@ pub enum PaletteColor {
 impl Default for PaletteColor {
     fn default() -> PaletteColor {
         PaletteColor::EightBit(0)
+    }
+}
+
+// these are used for the web client
+impl PaletteColor {
+    pub fn as_rgb_str(&self) -> String {
+        let (r, g, b) = match *self {
+            Self::Rgb((r, g, b)) => (r, g, b),
+            Self::EightBit(c) => eightbit_to_rgb(c),
+        };
+        format!("rgb({}, {}, {})", r, g, b)
+    }
+    pub fn from_rgb_str(rgb_str: &str) -> Self {
+        let trimmed = rgb_str.trim();
+
+        if !trimmed.starts_with("rgb(") || !trimmed.ends_with(')') {
+            return Self::default();
+        }
+
+        let inner = trimmed
+            .strip_prefix("rgb(")
+            .and_then(|s| s.strip_suffix(')'))
+            .unwrap_or("");
+
+        let parts: Vec<&str> = inner.split(',').collect();
+
+        if parts.len() != 3 {
+            return Self::default();
+        }
+
+        let mut rgb_values = [0u8; 3];
+        for (i, part) in parts.iter().enumerate() {
+            if let Some(rgb_val) = rgb_values.get_mut(i) {
+                if let Ok(parsed) = part.trim().parse::<u8>() {
+                    *rgb_val = parsed;
+                } else {
+                    return Self::default();
+                }
+            }
+        }
+
+        Self::Rgb((rgb_values[0], rgb_values[1], rgb_values[2]))
     }
 }
 
@@ -1274,8 +1347,8 @@ pub const DEFAULT_STYLES: Styling = Styling {
     },
     frame_highlight: StyleDeclaration {
         base: PaletteColor::EightBit(default_colors::ORANGE),
-        emphasis_0: PaletteColor::EightBit(default_colors::GREEN),
-        emphasis_1: PaletteColor::EightBit(default_colors::GREEN),
+        emphasis_0: PaletteColor::EightBit(default_colors::MAGENTA),
+        emphasis_1: PaletteColor::EightBit(default_colors::PURPLE),
         emphasis_2: PaletteColor::EightBit(default_colors::GREEN),
         emphasis_3: PaletteColor::EightBit(default_colors::GREEN),
         background: PaletteColor::EightBit(default_colors::GREEN),
@@ -1432,8 +1505,8 @@ impl From<Palette> for Styling {
             },
             frame_highlight: StyleDeclaration {
                 base: palette.orange,
-                emphasis_0: palette.orange,
-                emphasis_1: palette.orange,
+                emphasis_0: palette.magenta,
+                emphasis_1: palette.purple,
                 emphasis_2: palette.orange,
                 emphasis_3: palette.orange,
                 background: Default::default(),
@@ -1508,6 +1581,14 @@ pub struct ModeInfo {
     pub session_name: Option<String>,
     pub editor: Option<PathBuf>,
     pub shell: Option<PathBuf>,
+    pub web_clients_allowed: Option<bool>,
+    pub web_sharing: Option<WebSharing>,
+    pub currently_marking_pane_group: Option<bool>,
+    pub is_web_client: Option<bool>,
+    // note: these are only the configured ip/port that will be bound if and when the server is up
+    pub web_server_ip: Option<IpAddr>,
+    pub web_server_port: Option<u16>,
+    pub web_server_capability: Option<bool>,
 }
 
 impl ModeInfo {
@@ -1543,6 +1624,11 @@ impl ModeInfo {
     pub fn update_hide_session_name(&mut self, hide_session_name: bool) {
         self.style.hide_session_name = hide_session_name;
     }
+    pub fn change_to_default_mode(&mut self) {
+        if let Some(base_mode) = self.base_mode {
+            self.mode = base_mode;
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize, Serialize)]
@@ -1554,6 +1640,8 @@ pub struct SessionInfo {
     pub is_current_session: bool,
     pub available_layouts: Vec<LayoutInfo>,
     pub plugins: BTreeMap<u32, PluginInfo>,
+    pub web_clients_allowed: bool,
+    pub web_client_count: usize,
     pub tab_history: BTreeMap<ClientId, Vec<usize>>,
 }
 
@@ -1595,6 +1683,33 @@ impl LayoutInfo {
             LayoutInfo::File(_name) => false,
             LayoutInfo::Url(_url) => false,
             LayoutInfo::Stringified(_stringified) => false,
+        }
+    }
+    pub fn from_config(
+        layout_dir: &Option<PathBuf>,
+        layout_path: &Option<PathBuf>,
+    ) -> Option<Self> {
+        match layout_path {
+            Some(layout_path) => {
+                if layout_path.extension().is_some() || layout_path.components().count() > 1 {
+                    let Some(layout_dir) = layout_dir
+                        .as_ref()
+                        .map(|l| l.clone())
+                        .or_else(default_layout_dir)
+                    else {
+                        return None;
+                    };
+                    Some(LayoutInfo::File(
+                        layout_dir.join(layout_path).display().to_string(),
+                    ))
+                } else if layout_path.starts_with("http://") || layout_path.starts_with("https://")
+                {
+                    Some(LayoutInfo::Url(layout_path.display().to_string()))
+                } else {
+                    Some(LayoutInfo::BuiltIn(layout_path.display().to_string()))
+                }
+            },
+            None => None,
         }
     }
 }
@@ -1733,6 +1848,9 @@ pub struct PaneInfo {
     /// Unselectable panes are often used for UI elements that do not have direct user interaction
     /// (eg. the default `status-bar` or `tab-bar`).
     pub is_selectable: bool,
+    /// Grouped panes (usually through an explicit user action) that are staged for a bulk action
+    /// the index is kept track of in order to preserve the pane group order
+    pub index_in_pane_group: BTreeMap<ClientId, usize>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct ClientInfo {
@@ -1758,11 +1876,230 @@ impl ClientInfo {
     }
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PaneRenderReport {
+    pub all_pane_contents: HashMap<ClientId, HashMap<PaneId, PaneContents>>,
+}
+
+impl PaneRenderReport {
+    pub fn add_pane_contents(
+        &mut self,
+        client_ids: &[ClientId],
+        pane_id: PaneId,
+        pane_contents: PaneContents,
+    ) {
+        for client_id in client_ids {
+            let p = self
+                .all_pane_contents
+                .entry(*client_id)
+                .or_insert_with(|| HashMap::new());
+            p.insert(pane_id, pane_contents.clone());
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PaneContents {
+    // NOTE: both lines_above_viewport and lines_below_viewport are only populated if explicitly
+    // requested (eg. with get_full_scrollback true in the plugin command) this is for performance
+    // reasons
+    pub lines_above_viewport: Vec<String>,
+    pub lines_below_viewport: Vec<String>,
+    pub viewport: Vec<String>,
+    pub selected_text: Option<SelectedText>,
+}
+
+/// Extract text from a line between two column positions, accounting for wide characters
+fn extract_text_by_columns(line: &str, start_col: usize, end_col: usize) -> String {
+    let mut current_col = 0;
+    let mut result = String::new();
+    let mut capturing = false;
+
+    for ch in line.chars() {
+        let char_width = ch.width().unwrap_or(0);
+
+        // Start capturing when we reach start_col
+        if current_col >= start_col && !capturing {
+            capturing = true;
+        }
+
+        // Stop if we've reached or passed end_col
+        if current_col >= end_col {
+            break;
+        }
+
+        // Capture character if we're in the range
+        if capturing {
+            result.push(ch);
+        }
+
+        current_col += char_width;
+    }
+
+    result
+}
+
+/// Extract text from a line starting at a column position, accounting for wide characters
+fn extract_text_from_column(line: &str, start_col: usize) -> String {
+    let mut current_col = 0;
+    let mut result = String::new();
+    let mut capturing = false;
+
+    for ch in line.chars() {
+        let char_width = ch.width().unwrap_or(0);
+
+        if current_col >= start_col {
+            capturing = true;
+        }
+
+        if capturing {
+            result.push(ch);
+        }
+
+        current_col += char_width;
+    }
+
+    result
+}
+
+/// Extract text from a line up to a column position, accounting for wide characters
+fn extract_text_to_column(line: &str, end_col: usize) -> String {
+    let mut current_col = 0;
+    let mut result = String::new();
+
+    for ch in line.chars() {
+        let char_width = ch.width().unwrap_or(0);
+
+        if current_col >= end_col {
+            break;
+        }
+
+        result.push(ch);
+        current_col += char_width;
+    }
+
+    result
+}
+
+impl PaneContents {
+    pub fn new(viewport: Vec<String>, selection_start: Position, selection_end: Position) -> Self {
+        PaneContents {
+            viewport,
+            selected_text: SelectedText::from_positions(selection_start, selection_end),
+            ..Default::default()
+        }
+    }
+    pub fn new_with_scrollback(
+        viewport: Vec<String>,
+        selection_start: Position,
+        selection_end: Position,
+        lines_above_viewport: Vec<String>,
+        lines_below_viewport: Vec<String>,
+    ) -> Self {
+        PaneContents {
+            viewport,
+            selected_text: SelectedText::from_positions(selection_start, selection_end),
+            lines_above_viewport,
+            lines_below_viewport,
+        }
+    }
+
+    /// Returns the actual text content of the selection, if any exists.
+    /// Selection only occurs within the viewport.
+    pub fn get_selected_text(&self) -> Option<String> {
+        let selected_text = self.selected_text?;
+
+        let start_line = selected_text.start.line() as usize;
+        let start_col = selected_text.start.column();
+        let end_line = selected_text.end.line() as usize;
+        let end_col = selected_text.end.column();
+
+        // Handle out of bounds
+        if start_line >= self.viewport.len() || end_line >= self.viewport.len() {
+            return None;
+        }
+
+        if start_line == end_line {
+            // Single line selection
+            let line = &self.viewport[start_line];
+            Some(extract_text_by_columns(line, start_col, end_col))
+        } else {
+            // Multi-line selection
+            let mut result = String::new();
+
+            // First line - from start column to end of line
+            let first_line = &self.viewport[start_line];
+            result.push_str(&extract_text_from_column(first_line, start_col));
+            result.push('\n');
+
+            // Middle lines - complete lines
+            for i in (start_line + 1)..end_line {
+                result.push_str(&self.viewport[i]);
+                result.push('\n');
+            }
+
+            // Last line - from start to end column
+            let last_line = &self.viewport[end_line];
+            result.push_str(&extract_text_to_column(last_line, end_col));
+
+            Some(result)
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum PaneScrollbackResponse {
+    Ok(PaneContents),
+    Err(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SelectedText {
+    pub start: Position,
+    pub end: Position,
+}
+
+impl SelectedText {
+    pub fn new(start: Position, end: Position) -> Self {
+        // Normalize: ensure start <= end
+        let (normalized_start, normalized_end) = if start <= end {
+            (start, end)
+        } else {
+            (end, start)
+        };
+
+        // Normalize negative line values to 0
+        // (column is already usize so can't be negative)
+        let normalized_start = Position::new(
+            normalized_start.line().max(0) as i32,
+            normalized_start.column() as u16,
+        );
+        let normalized_end = Position::new(
+            normalized_end.line().max(0) as i32,
+            normalized_end.column() as u16,
+        );
+
+        SelectedText {
+            start: normalized_start,
+            end: normalized_end,
+        }
+    }
+
+    pub fn from_positions(start: Position, end: Position) -> Option<Self> {
+        if start == end {
+            None
+        } else {
+            Some(Self::new(start, end))
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
 pub struct PluginIds {
     pub plugin_id: u32,
     pub zellij_pid: u32,
     pub initial_cwd: PathBuf,
+    pub client_id: ClientId,
 }
 
 /// Tag used to identify the plugin in layout and config kdl files
@@ -1870,6 +2207,7 @@ pub struct MessageToPlugin {
     /// these will only be used in case we need to launch a new plugin to send this message to,
     /// since none are running
     pub new_plugin_args: Option<NewPluginArgs>,
+    pub floating_pane_coordinates: Option<FloatingPaneCoordinates>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -1879,6 +2217,7 @@ pub struct NewPluginArgs {
     pub pane_title: Option<String>,
     pub cwd: Option<PathBuf>,
     pub skip_cache: bool,
+    pub should_focus: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -1933,6 +2272,13 @@ impl MessageToPlugin {
         self.message_args = args;
         self
     }
+    pub fn with_floating_pane_coordinates(
+        mut self,
+        floating_pane_coordinates: FloatingPaneCoordinates,
+    ) -> Self {
+        self.floating_pane_coordinates = Some(floating_pane_coordinates);
+        self
+    }
     pub fn new_plugin_instance_should_float(mut self, should_float: bool) -> Self {
         let new_plugin_args = self.new_plugin_args.get_or_insert_with(Default::default);
         new_plugin_args.should_float = Some(should_float);
@@ -1961,9 +2307,14 @@ impl MessageToPlugin {
         new_plugin_args.skip_cache = true;
         self
     }
+    pub fn new_plugin_instance_should_be_focused(mut self) -> Self {
+        let new_plugin_args = self.new_plugin_args.get_or_insert_with(Default::default);
+        new_plugin_args.should_focus = Some(true);
+        self
+    }
 }
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ConnectToSession {
     pub name: Option<String>,
     pub tab_position: Option<usize>,
@@ -2131,6 +2482,18 @@ impl FloatingPaneCoordinates {
     }
 }
 
+impl From<PaneGeom> for FloatingPaneCoordinates {
+    fn from(pane_geom: PaneGeom) -> Self {
+        FloatingPaneCoordinates {
+            x: Some(SplitSize::Fixed(pane_geom.x)),
+            y: Some(SplitSize::Fixed(pane_geom.y)),
+            width: Some(SplitSize::Fixed(pane_geom.cols.as_usize())),
+            height: Some(SplitSize::Fixed(pane_geom.rows.as_usize())),
+            pinned: Some(pane_geom.is_pinned),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct OriginatingPlugin {
     pub plugin_id: u32,
@@ -2144,6 +2507,153 @@ impl OriginatingPlugin {
             plugin_id,
             client_id,
             context,
+        }
+    }
+}
+
+#[derive(ArgEnum, Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WebSharing {
+    #[serde(alias = "on")]
+    On,
+    #[serde(alias = "off")]
+    Off,
+    #[serde(alias = "disabled")]
+    Disabled,
+}
+
+impl Default for WebSharing {
+    fn default() -> Self {
+        Self::Off
+    }
+}
+
+impl WebSharing {
+    pub fn is_on(&self) -> bool {
+        match self {
+            WebSharing::On => true,
+            _ => false,
+        }
+    }
+    pub fn web_clients_allowed(&self) -> bool {
+        match self {
+            WebSharing::On => true,
+            _ => false,
+        }
+    }
+    pub fn sharing_is_disabled(&self) -> bool {
+        match self {
+            WebSharing::Disabled => true,
+            _ => false,
+        }
+    }
+    pub fn set_sharing(&mut self) -> bool {
+        // returns true if successfully set sharing
+        match self {
+            WebSharing::On => true,
+            WebSharing::Off => {
+                *self = WebSharing::On;
+                true
+            },
+            WebSharing::Disabled => false,
+        }
+    }
+    pub fn set_not_sharing(&mut self) -> bool {
+        // returns true if successfully set not sharing
+        match self {
+            WebSharing::On => {
+                *self = WebSharing::Off;
+                true
+            },
+            WebSharing::Off => true,
+            WebSharing::Disabled => false,
+        }
+    }
+}
+
+impl FromStr for WebSharing {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "On" | "on" => Ok(Self::On),
+            "Off" | "off" => Ok(Self::Off),
+            "Disabled" | "disabled" => Ok(Self::Disabled),
+            _ => Err(format!("No such option: {}", s)),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub enum NewPanePlacement {
+    NoPreference,
+    Tiled(Option<Direction>),
+    Floating(Option<FloatingPaneCoordinates>),
+    InPlace {
+        pane_id_to_replace: Option<PaneId>,
+        close_replaced_pane: bool,
+    },
+    Stacked(Option<PaneId>),
+}
+
+impl Default for NewPanePlacement {
+    fn default() -> Self {
+        NewPanePlacement::NoPreference
+    }
+}
+
+impl NewPanePlacement {
+    pub fn with_floating_pane_coordinates(
+        floating_pane_coordinates: Option<FloatingPaneCoordinates>,
+    ) -> Self {
+        NewPanePlacement::Floating(floating_pane_coordinates)
+    }
+    pub fn with_should_be_in_place(
+        self,
+        should_be_in_place: bool,
+        close_replaced_pane: bool,
+    ) -> Self {
+        if should_be_in_place {
+            NewPanePlacement::InPlace {
+                pane_id_to_replace: None,
+                close_replaced_pane,
+            }
+        } else {
+            self
+        }
+    }
+    pub fn with_pane_id_to_replace(
+        pane_id_to_replace: Option<PaneId>,
+        close_replaced_pane: bool,
+    ) -> Self {
+        NewPanePlacement::InPlace {
+            pane_id_to_replace,
+            close_replaced_pane,
+        }
+    }
+    pub fn should_float(&self) -> Option<bool> {
+        match self {
+            NewPanePlacement::Floating(_) => Some(true),
+            NewPanePlacement::Tiled(_) => Some(false),
+            _ => None,
+        }
+    }
+    pub fn floating_pane_coordinates(&self) -> Option<FloatingPaneCoordinates> {
+        match self {
+            NewPanePlacement::Floating(floating_pane_coordinates) => {
+                floating_pane_coordinates.clone()
+            },
+            _ => None,
+        }
+    }
+    pub fn should_stack(&self) -> bool {
+        match self {
+            NewPanePlacement::Stacked(_) => true,
+            _ => false,
+        }
+    }
+    pub fn id_of_stack_root(&self) -> Option<PaneId> {
+        match self {
+            NewPanePlacement::Stacked(id) => *id,
+            _ => None,
         }
     }
 }
@@ -2174,7 +2684,10 @@ pub enum PluginCommand {
     ShowSelf(bool), // bool - should float if hidden
     SwitchToMode(InputMode),
     NewTabsWithLayout(String), // raw kdl layout
-    NewTab,
+    NewTab {
+        name: Option<String>,
+        cwd: Option<String>,
+    },
     GoToNextTab,
     GoToPreviousTab,
     Resize(Resize),
@@ -2260,6 +2773,10 @@ pub enum PluginCommand {
     RerunCommandPane(u32), // u32  - terminal pane id
     ResizePaneIdWithDirection(ResizeStrategy, PaneId),
     EditScrollbackForPaneWithId(PaneId),
+    GetPaneScrollback {
+        pane_id: PaneId,
+        get_full_scrollback: bool,
+    },
     WriteToPaneId(Vec<u8>, PaneId),
     WriteCharsToPaneId(String, PaneId),
     MovePaneWithPaneId(PaneId),
@@ -2306,5 +2823,26 @@ pub enum PluginCommand {
     // close_plugin_after_replace
     OpenFileNearPlugin(FileToOpen, Context),
     OpenFileFloatingNearPlugin(FileToOpen, Option<FloatingPaneCoordinates>, Context),
+    StartWebServer,
+    StopWebServer,
+    ShareCurrentSession,
+    StopSharingCurrentSession,
     OpenFileInPlaceOfPlugin(FileToOpen, bool, Context), // bool -> close_plugin_after_replace
+    GroupAndUngroupPanes(Vec<PaneId>, Vec<PaneId>, bool), // panes to group, panes to ungroup,
+    // bool -> for all clients
+    HighlightAndUnhighlightPanes(Vec<PaneId>, Vec<PaneId>), // panes to highlight, panes to
+    // unhighlight
+    CloseMultiplePanes(Vec<PaneId>),
+    FloatMultiplePanes(Vec<PaneId>),
+    EmbedMultiplePanes(Vec<PaneId>),
+    QueryWebServerStatus,
+    SetSelfMouseSelectionSupport(bool),
+    GenerateWebLoginToken(Option<String>), // String -> optional token label
+    RevokeWebLoginToken(String),           // String -> token id (provided name or generated id)
+    ListWebLoginTokens,
+    RevokeAllWebLoginTokens,
+    RenameWebLoginToken(String, String), // (original_name, new_name)
+    InterceptKeyPresses,
+    ClearKeyPressesIntercepts,
+    ReplacePaneWithExistingPane(PaneId, PaneId), // (pane id to replace, pane id of existing)
 }

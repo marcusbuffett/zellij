@@ -1,15 +1,15 @@
-use zellij_utils::async_std::task;
+use async_std::task;
 use zellij_utils::consts::{
     session_info_cache_file_name, session_info_folder_for_session, session_layout_cache_file_name,
-    ZELLIJ_SESSION_INFO_CACHE_DIR, ZELLIJ_SOCK_DIR,
+    VERSION, ZELLIJ_SESSION_INFO_CACHE_DIR, ZELLIJ_SOCK_DIR,
 };
-use zellij_utils::data::{Event, HttpVerb, SessionInfo};
+use zellij_utils::data::{Event, HttpVerb, SessionInfo, WebServerStatus};
 use zellij_utils::errors::{prelude::*, BackgroundJobContext, ContextType};
 use zellij_utils::input::layout::RunPlugin;
 
-use zellij_utils::isahc::prelude::*;
-use zellij_utils::isahc::AsyncReadResponseExt;
-use zellij_utils::isahc::{config::RedirectPolicy, HttpClient, Request};
+use isahc::prelude::*;
+use isahc::AsyncReadResponseExt;
+use isahc::{config::RedirectPolicy, HttpClient, Request};
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
@@ -55,6 +55,9 @@ pub enum BackgroundJob {
         Vec<u8>,                  // body
         BTreeMap<String, String>, // context
     ),
+    HighlightPanesWithMessage(Vec<PaneId>, String),
+    RenderToClients,
+    QueryZellijWebServerStatus,
     Exit,
 }
 
@@ -74,20 +77,30 @@ impl From<&BackgroundJob> for BackgroundJobContext {
             BackgroundJob::RunCommand(..) => BackgroundJobContext::RunCommand,
             BackgroundJob::WebRequest(..) => BackgroundJobContext::WebRequest,
             BackgroundJob::ReportPluginList(..) => BackgroundJobContext::ReportPluginList,
+            BackgroundJob::RenderToClients => BackgroundJobContext::ReportPluginList,
+            BackgroundJob::HighlightPanesWithMessage(..) => {
+                BackgroundJobContext::HighlightPanesWithMessage
+            },
+            BackgroundJob::QueryZellijWebServerStatus => {
+                BackgroundJobContext::QueryZellijWebServerStatus
+            },
             BackgroundJob::Exit => BackgroundJobContext::Exit,
         }
     }
 }
 
-static FLASH_DURATION_MS: u64 = 1000;
+static LONG_FLASH_DURATION_MS: u64 = 1000;
+static FLASH_DURATION_MS: u64 = 400; // Doherty threshold
 static PLUGIN_ANIMATION_OFFSET_DURATION_MD: u64 = 500;
 static SESSION_READ_DURATION: u64 = 1000;
 static DEFAULT_SERIALIZATION_INTERVAL: u64 = 60000;
+static REPAINT_DELAY_MS: u64 = 10;
 
 pub(crate) fn background_jobs_main(
     bus: Bus<BackgroundJob>,
     serialization_interval: Option<u64>,
     disable_session_metadata: bool,
+    web_server_base_url: String,
 ) -> Result<()> {
     let err_context = || "failed to write to pty".to_string();
     let mut running_jobs: HashMap<BackgroundJob, Instant> = HashMap::new();
@@ -100,6 +113,7 @@ pub(crate) fn background_jobs_main(
     let last_serialization_time = Arc::new(Mutex::new(Instant::now()));
     let serialization_interval = serialization_interval.map(|s| s * 1000); // convert to
                                                                            // milliseconds
+    let last_render_request: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
 
     let http_client = HttpClient::builder()
         // TODO: timeout?
@@ -125,7 +139,7 @@ pub(crate) fn background_jobs_main(
                                 Some(text),
                             ),
                         );
-                        task::sleep(std::time::Duration::from_millis(FLASH_DURATION_MS)).await;
+                        task::sleep(std::time::Duration::from_millis(LONG_FLASH_DURATION_MS)).await;
                         let _ = senders.send_to_screen(
                             ScreenInstruction::ClearPaneFrameColorOverride(pane_ids),
                         );
@@ -223,7 +237,9 @@ pub(crate) fn background_jobs_main(
                                     .unwrap_or(DEFAULT_SERIALIZATION_INTERVAL)
                                     .into()
                             {
-                                let _ = senders.send_to_screen(ScreenInstruction::DumpLayoutToHd);
+                                let _ = senders.send_to_screen(
+                                    ScreenInstruction::SerializeLayoutForResurrection,
+                                );
                                 *last_serialization_time.lock().unwrap() = Instant::now();
                             }
                             task::sleep(std::time::Duration::from_millis(SESSION_READ_DURATION))
@@ -291,7 +307,7 @@ pub(crate) fn background_jobs_main(
                             http_client: HttpClient,
                         ) -> Result<
                             (u16, BTreeMap<String, String>, Vec<u8>), // status_code, headers, body
-                            zellij_utils::isahc::Error,
+                            isahc::Error,
                         > {
                             let mut request = match verb {
                                 HttpVerb::Get => Request::get(url),
@@ -360,6 +376,156 @@ pub(crate) fn background_jobs_main(
                     }
                 });
             },
+            BackgroundJob::QueryZellijWebServerStatus => {
+                if !cfg!(feature = "web_server_capability") {
+                    // no web server capability, no need to query
+                    continue;
+                }
+
+                task::spawn({
+                    let http_client = http_client.clone();
+                    let senders = bus.senders.clone();
+                    let web_server_base_url = web_server_base_url.clone();
+                    async move {
+                        async fn web_request(
+                            http_client: HttpClient,
+                            web_server_base_url: &str,
+                        ) -> Result<
+                            (u16, Vec<u8>), // status_code, body
+                            isahc::Error,
+                        > {
+                            let request =
+                                Request::get(format!("{}/info/version", web_server_base_url,));
+                            let req = request.body(())?;
+                            let mut res = http_client.send_async(req).await?;
+
+                            let status_code = res.status();
+                            let body = res.bytes().await?;
+                            Ok((status_code.as_u16(), body))
+                        }
+                        let Some(http_client) = http_client else {
+                            log::error!("Cannot perform http request, likely due to a misconfigured http client");
+                            return;
+                        };
+
+                        let http_client = http_client.clone();
+                        match web_request(http_client, &web_server_base_url).await {
+                            Ok((status, body)) => {
+                                if status == 200 && &body == VERSION.as_bytes() {
+                                    // online
+                                    let _ =
+                                        senders.send_to_plugin(PluginInstruction::Update(vec![(
+                                            None,
+                                            None,
+                                            Event::WebServerStatus(WebServerStatus::Online(
+                                                web_server_base_url.clone(),
+                                            )),
+                                        )]));
+                                } else if status == 200 {
+                                    let _ =
+                                        senders.send_to_plugin(PluginInstruction::Update(vec![(
+                                            None,
+                                            None,
+                                            Event::WebServerStatus(
+                                                WebServerStatus::DifferentVersion(
+                                                    String::from_utf8_lossy(&body).to_string(),
+                                                ),
+                                            ),
+                                        )]));
+                                } else {
+                                    // offline/error
+                                    let _ =
+                                        senders.send_to_plugin(PluginInstruction::Update(vec![(
+                                            None,
+                                            None,
+                                            Event::WebServerStatus(WebServerStatus::Offline),
+                                        )]));
+                                }
+                            },
+                            Err(e) => {
+                                if e.kind() == isahc::error::ErrorKind::ConnectionFailed {
+                                    let _ =
+                                        senders.send_to_plugin(PluginInstruction::Update(vec![(
+                                            None,
+                                            None,
+                                            Event::WebServerStatus(WebServerStatus::Offline),
+                                        )]));
+                                } else {
+                                    // no-op - otherwise we'll get errors if we were mid-request
+                                    // (eg. when the server was shut down by a user action)
+                                }
+                            },
+                        }
+                    }
+                });
+            },
+            BackgroundJob::RenderToClients => {
+                // last_render_request being Some() represents a render request that is pending
+                // last_render_request is only ever set to Some() if an async task is spawned to
+                // send the actual render instruction
+                //
+                // given this:
+                // - if last_render_request is None and we received this job, we should spawn an
+                // async task to send the render instruction and log the current task time
+                // - if last_render_request is Some(), it means we're currently waiting to render,
+                // so we should log the render request and do nothing, once the async task has
+                // finished running, it will check to see if the render time was updated while it
+                // was running, and if so send this instruction again so the process can start anew
+                let (should_run_task, current_time) = {
+                    let mut last_render_request = last_render_request.lock().unwrap();
+                    let should_run_task = last_render_request.is_none();
+                    let current_time = Instant::now();
+                    *last_render_request = Some(current_time);
+                    (should_run_task, current_time)
+                };
+                if should_run_task {
+                    task::spawn({
+                        let senders = bus.senders.clone();
+                        let last_render_request = last_render_request.clone();
+                        let task_start_time = current_time;
+                        async move {
+                            task::sleep(std::time::Duration::from_millis(REPAINT_DELAY_MS)).await;
+                            let _ = senders.send_to_screen(ScreenInstruction::RenderToClients);
+                            {
+                                let mut last_render_request = last_render_request.lock().unwrap();
+                                if let Some(last_render_request) = *last_render_request {
+                                    if last_render_request > task_start_time {
+                                        // another render request was received while we were
+                                        // sleeping, schedule this job again so that we can also
+                                        // render that request
+                                        let _ = senders.send_to_background_jobs(
+                                            BackgroundJob::RenderToClients,
+                                        );
+                                    }
+                                }
+                                // reset the last_render_request so that the task will be spawned
+                                // again once a new request is received
+                                *last_render_request = None;
+                            }
+                        }
+                    });
+                }
+            },
+            BackgroundJob::HighlightPanesWithMessage(pane_ids, text) => {
+                if job_already_running(job, &mut running_jobs) {
+                    continue;
+                }
+                task::spawn({
+                    let senders = bus.senders.clone();
+                    async move {
+                        let _ = senders.send_to_screen(
+                            ScreenInstruction::AddHighlightPaneFrameColorOverride(
+                                pane_ids.clone(),
+                                Some(text),
+                            ),
+                        );
+                        task::sleep(std::time::Duration::from_millis(FLASH_DURATION_MS)).await;
+                        let _ = senders.send_to_screen(
+                            ScreenInstruction::ClearPaneFrameColorOverride(pane_ids),
+                        );
+                    }
+                });
+            },
             BackgroundJob::Exit => {
                 for loading_plugin in loading_plugins.values() {
                     loading_plugin.store(false, Ordering::SeqCst);
@@ -380,7 +546,9 @@ fn job_already_running(
 ) -> bool {
     match running_jobs.get_mut(&job) {
         Some(current_running_job_start_time) => {
-            if current_running_job_start_time.elapsed() > Duration::from_millis(FLASH_DURATION_MS) {
+            if current_running_job_start_time.elapsed()
+                > Duration::from_millis(LONG_FLASH_DURATION_MS)
+            {
                 *current_running_job_start_time = Instant::now();
                 false
             } else {

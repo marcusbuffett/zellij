@@ -140,6 +140,26 @@ enum CommandName {
   OpenFileNearPlugin = 124;
   OpenFileFloatingNearPlugin = 125;
   OpenFileInPlaceOfPlugin = 126;
+  StartWebServer = 127;
+  GroupAndUngroupPanes = 128;
+  HighlightAndUnhighlightPanes = 129;
+  CloseMultiplePanes = 130;
+  FloatMultiplePanes = 131;
+  EmbedMultiplePanes = 132;
+  ShareCurrentSession = 133;
+  StopSharingCurrentSession = 134;
+  StopWebServer = 135;
+  QueryWebServerStatus = 136;
+  SetSelfMouseSelectionSupport = 137;
+  GenerateWebLoginToken = 138;
+  RevokeWebLoginToken = 139;
+  ListWebLoginTokens = 140;
+  RevokeAllWebLoginTokens = 141;
+  RenameWebLoginToken = 142;
+  InterceptKeyPresses = 143;
+  ClearKeyPressesIntercepts = 144;
+  ReplacePaneWithExistingPane = 155;
+  GetPaneScrollback = 163;
 }
 
 message PluginCommand {
@@ -236,7 +256,69 @@ message PluginCommand {
     OpenFileNearPluginPayload open_file_near_plugin_payload = 99;
     OpenFileFloatingNearPluginPayload open_file_floating_near_plugin_payload = 100;
     OpenFileInPlaceOfPluginPayload open_file_in_place_of_plugin_payload = 101;
+    GroupAndUngroupPanesPayload group_and_ungroup_panes_payload = 102;
+    HighlightAndUnhighlightPanesPayload highlight_and_unhighlight_panes_payload = 103;
+    CloseMultiplePanesPayload close_multiple_panes_payload = 104;
+    FloatMultiplePanesPayload float_multiple_panes_payload = 105;
+    EmbedMultiplePanesPayload embed_multiple_panes_payload = 106;
+    SetSelfMouseSelectionSupportPayload set_self_mouse_selection_support_payload = 107;
+    GenerateWebLoginTokenPayload generate_web_login_token_payload = 108;
+    RevokeWebLoginTokenPayload revoke_web_login_token_payload = 109;
+    RenameWebLoginTokenPayload rename_web_login_token_payload = 110;
+    ReplacePaneWithExistingPanePayload replace_pane_with_existing_pane_payload = 111;
+    NewTabPayload new_tab_payload = 112;
+    GetPaneScrollbackPayload get_pane_scrollback_payload = 113;
   }
+}
+
+message NewTabPayload {
+  optional string name = 1;
+  optional string cwd = 2;
+}
+
+message ReplacePaneWithExistingPanePayload {
+  PaneId pane_id_to_replace = 1;
+  PaneId existing_pane_id = 2;
+}
+
+message RenameWebLoginTokenPayload {
+  string old_name = 1;
+  string new_name = 2;
+}
+
+message RevokeWebLoginTokenPayload {
+  string token_label = 1;
+}
+
+message GenerateWebLoginTokenPayload {
+  optional string token_label = 1;
+}
+
+message SetSelfMouseSelectionSupportPayload {
+  bool support_mouse_selection = 1;
+}
+
+message EmbedMultiplePanesPayload {
+  repeated PaneId pane_ids = 1;
+}
+
+message FloatMultiplePanesPayload {
+  repeated PaneId pane_ids = 1;
+}
+
+message CloseMultiplePanesPayload {
+  repeated PaneId pane_ids = 1;
+}
+
+message HighlightAndUnhighlightPanesPayload {
+  repeated PaneId pane_ids_to_highlight = 1;
+  repeated PaneId pane_ids_to_unhighlight = 2;
+}
+
+message GroupAndUngroupPanesPayload {
+  repeated PaneId pane_ids_to_group = 1;
+  repeated PaneId pane_ids_to_ungroup = 2;
+  bool for_all_clients = 3;
 }
 
 message OpenFileInPlaceOfPluginPayload {
@@ -457,6 +539,7 @@ message MessageToPluginPayload {
   repeated ContextItem message_args = 5;
   optional NewPluginArgs new_plugin_args = 6;
   optional uint32 destination_plugin_id = 7;
+  optional FloatingPaneCoordinates floating_pane_coordinates = 8;
 }
 
 message NewPluginArgs {
@@ -465,6 +548,7 @@ message NewPluginArgs {
     optional string pane_title = 3;
     optional string cwd = 4;
     bool skip_cache = 5;
+    optional bool should_focus = 6;
 }
 
 message PaneId {
@@ -592,4 +676,37 @@ message FixedOrPercentValue {
 enum FixedOrPercent {
   Fixed = 0;
   Percent = 1;
+}
+
+message CreateTokenResponse {
+  optional string token = 1;
+  optional string token_label = 2;
+  optional string error = 3;
+}
+
+message RevokeTokenResponse {
+  bool successfully_revoked = 1;
+  optional string error = 2;
+}
+
+message ListTokensResponse {
+  // tokens/creation_times should be synchronized
+  repeated string tokens = 1;
+  repeated string creation_times = 2;
+  optional string error = 3;
+}
+
+message RevokeAllWebTokensResponse {
+  bool successfully_revoked = 1;
+  optional string error = 2;
+}
+
+message RenameWebTokenResponse {
+  bool successfully_renamed = 1;
+  optional string error = 2;
+}
+
+message GetPaneScrollbackPayload {
+  PaneId pane_id = 1;
+  bool get_full_scrollback = 2;
 }

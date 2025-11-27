@@ -15,7 +15,7 @@ use crate::{
     ClientId,
 };
 use std::time::Instant;
-use zellij_utils::data::{InputMode, PaletteColor};
+use zellij_utils::data::{InputMode, PaletteColor, PaneContents};
 
 macro_rules! mock_pane {
     ($pane_id:expr, $dimension:expr, $inner:expr, $x:expr, $y:expr, $logical_position:expr, $mock_panes:expr) => {
@@ -1218,7 +1218,7 @@ impl Pane for MockPane {
     fn add_red_pane_frame_color_override(&mut self, _error_text: Option<String>) {
         unimplemented!()
     }
-    fn clear_pane_frame_color_override(&mut self) {
+    fn clear_pane_frame_color_override(&mut self, _client_id: Option<ClientId>) {
         unimplemented!()
     }
     fn frame_color_override(&self) -> Option<PaletteColor> {
@@ -1234,6 +1234,13 @@ impl Pane for MockPane {
         unimplemented!()
     }
     fn custom_title(&self) -> Option<String> {
+        unimplemented!()
+    }
+    fn pane_contents(
+        &self,
+        _client_id: Option<ClientId>,
+        _get_full_scrollback: bool,
+    ) -> PaneContents {
         unimplemented!()
     }
 }

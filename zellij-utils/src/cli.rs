@@ -2,10 +2,11 @@ use crate::data::{Direction, InputMode, Resize};
 use crate::setup::Setup;
 use crate::{
     consts::{ZELLIJ_CONFIG_DIR_ENV, ZELLIJ_CONFIG_FILE_ENV},
-    input::{layout::PluginUserConfiguration, options::CliOptions},
+    input::{layout::PluginUserConfiguration, options::Options},
 };
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use serde::{Deserialize, Serialize};
+use std::net::IpAddr;
 use std::path::PathBuf;
 use url::Url;
 
@@ -79,26 +80,135 @@ pub struct CliArgs {
     pub debug: bool,
 }
 
+impl CliArgs {
+    pub fn is_setup_clean(&self) -> bool {
+        if let Some(Command::Setup(ref setup)) = &self.command {
+            if setup.clean {
+                return true;
+            }
+        }
+        false
+    }
+    pub fn options(&self) -> Option<Options> {
+        if let Some(Command::Options(options)) = &self.command {
+            return Some(options.clone());
+        }
+        None
+    }
+}
+
 #[derive(Debug, Subcommand, Clone, Serialize, Deserialize)]
 pub enum Command {
     /// Change the behaviour of zellij
     #[clap(name = "options", value_parser)]
-    Options(CliOptions),
+    Options(Options),
 
     /// Setup zellij and check its configuration
     #[clap(name = "setup", value_parser)]
     Setup(Setup),
+
+    /// Run a web server to serve terminal sessions
+    #[clap(name = "web", value_parser)]
+    Web(WebCli),
 
     /// Explore existing zellij sessions
     #[clap(flatten)]
     Sessions(Sessions),
 }
 
+#[derive(Debug, Clone, Args, Serialize, Deserialize)]
+pub struct WebCli {
+    /// Start the server (default unless other arguments are specified)
+    #[clap(long, value_parser, display_order = 1)]
+    pub start: bool,
+
+    /// Stop the server
+    #[clap(long, value_parser, exclusive(true), display_order = 2)]
+    pub stop: bool,
+
+    /// Get the server status
+    #[clap(long, value_parser, exclusive(true), display_order = 3)]
+    pub status: bool,
+
+    /// Run the server in the background
+    #[clap(
+        short,
+        long,
+        value_parser,
+        conflicts_with_all(&["stop", "status", "create-token", "revoke-token", "revoke-all-tokens"]),
+        display_order = 4
+    )]
+    pub daemonize: bool,
+    /// Create a login token for the web interface, will only be displayed once and cannot later be
+    /// retrieved. Returns the token name and the token.
+    #[clap(long, value_parser, exclusive(true), display_order = 5)]
+    pub create_token: bool,
+    /// Revoke a login token by its name
+    #[clap(
+        long,
+        value_parser,
+        exclusive(true),
+        value_name = "TOKEN NAME",
+        display_order = 6
+    )]
+    pub revoke_token: Option<String>,
+    /// Revoke all login tokens
+    #[clap(long, value_parser, exclusive(true), display_order = 7)]
+    pub revoke_all_tokens: bool,
+    /// List token names and their creation dates (cannot show actual tokens)
+    #[clap(long, value_parser, exclusive(true), display_order = 8)]
+    pub list_tokens: bool,
+    /// The ip address to listen on locally for connections (defaults to 127.0.0.1)
+    #[clap(
+        long,
+        value_parser,
+        conflicts_with_all(&["stop", "status", "create-token", "revoke-token", "revoke-all-tokens"]),
+        display_order = 9
+    )]
+    pub ip: Option<IpAddr>,
+    /// The port to listen on locally for connections (defaults to 8082)
+    #[clap(
+        long,
+        value_parser,
+        conflicts_with_all(&["stop", "status", "create-token", "revoke-token", "revoke-all-tokens"]),
+        display_order = 10
+    )]
+    pub port: Option<u16>,
+    /// The path to the SSL certificate (required if not listening on 127.0.0.1)
+    #[clap(
+        long,
+        value_parser,
+        conflicts_with_all(&["stop", "status", "create-token", "revoke-token", "revoke-all-tokens"]),
+        display_order = 11
+    )]
+    pub cert: Option<PathBuf>,
+    /// The path to the SSL key (required if not listening on 127.0.0.1)
+    #[clap(
+        long,
+        value_parser,
+        conflicts_with_all(&["stop", "status", "create-token", "revoke-token", "revoke-all-tokens"]),
+        display_order = 12
+    )]
+    pub key: Option<PathBuf>,
+}
+
+impl WebCli {
+    pub fn get_start(&self) -> bool {
+        self.start
+            || !(self.stop
+                || self.status
+                || self.create_token
+                || self.revoke_token.is_some()
+                || self.revoke_all_tokens
+                || self.list_tokens)
+    }
+}
+
 #[derive(Debug, Subcommand, Clone, Serialize, Deserialize)]
 pub enum SessionCommand {
     /// Change the behaviour of zellij
     #[clap(name = "options")]
-    Options(CliOptions),
+    Options(Options),
 }
 
 #[derive(Debug, Subcommand, Clone, Serialize, Deserialize)]
@@ -147,6 +257,26 @@ pub enum Sessions {
         /// If resurrecting a dead session, immediately run all its commands on startup
         #[clap(short, long, value_parser, takes_value(false), default_value("false"))]
         force_run_commands: bool,
+
+        /// Authentication token for remote sessions
+        #[clap(short('t'), long, value_parser)]
+        token: Option<String>,
+
+        /// Save session for automatic re-authentication (4 weeks)
+        #[clap(short('r'), long, value_parser)]
+        remember: bool,
+
+        /// Delete saved session before connecting
+        #[clap(long, value_parser)]
+        forget: bool,
+    },
+
+    /// Watch a session (read-only)
+    #[clap(visible_alias = "w")]
+    Watch {
+        /// Name of the session to watch
+        #[clap(value_parser)]
+        session_name: Option<String>,
     },
 
     /// Kill a specific session
@@ -249,6 +379,18 @@ pub enum Sessions {
         /// Whether to pin a floating pane so that it is always on top
         #[clap(long, requires("floating"))]
         pinned: Option<bool>,
+        #[clap(
+            long,
+            conflicts_with("floating"),
+            conflicts_with("direction"),
+            value_parser,
+            default_value("false"),
+            takes_value(false)
+        )]
+        stacked: bool,
+        /// Whether to block until this command has finished
+        #[clap(long, value_parser, default_value("false"), takes_value(false))]
+        blocking: bool,
     },
     /// Load a plugin
     #[clap(visible_alias = "p")]
@@ -538,6 +680,17 @@ pub enum CliAction {
         /// Whether to pin a floating pane so that it is always on top
         #[clap(long, requires("floating"))]
         pinned: Option<bool>,
+        #[clap(
+            long,
+            conflicts_with("floating"),
+            conflicts_with("direction"),
+            value_parser,
+            default_value("false"),
+            takes_value(false)
+        )]
+        stacked: bool,
+        #[clap(short, long)]
+        blocking: bool,
     },
     /// Open the specified file in a new zellij pane with your default EDITOR
     Edit {
@@ -640,7 +793,7 @@ pub enum CliAction {
         name: Option<String>,
 
         /// Change the working directory of the new tab
-        #[clap(short, long, value_parser, requires("layout"))]
+        #[clap(short, long, value_parser)]
         cwd: Option<PathBuf>,
     },
     /// Move the focused tab in the specified direction. [right|left]
@@ -791,5 +944,27 @@ tail -f /tmp/my-live-logfile | zellij action pipe --name logs --plugin https://e
         /// Whether to pin a floating pane so that it is always on top
         #[clap(long)]
         pinned: Option<bool>,
+    },
+    /// Detach from the current session
+    Detach,
+    /// Switch to a different session
+    SwitchSession {
+        /// Name of the session to switch to
+        name: String,
+        /// Optional tab position to focus
+        #[clap(long)]
+        tab_position: Option<usize>,
+        /// Optional pane ID to focus (eg. "terminal_1" for terminal pane with id 1, or "plugin_2" for plugin pane with id 2)
+        #[clap(long)]
+        pane_id: Option<String>,
+        /// Layout to apply when switching to the session (relative paths start at layout-dir)
+        #[clap(short, long, value_parser)]
+        layout: Option<PathBuf>,
+        /// Default folder to look for layouts
+        #[clap(long, value_parser, requires("layout"))]
+        layout_dir: Option<PathBuf>,
+        /// Change the working directory when switching
+        #[clap(short, long, value_parser)]
+        cwd: Option<PathBuf>,
     },
 }

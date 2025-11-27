@@ -5,14 +5,18 @@ pub use super::generated_api::api::{
     plugin_command::{
         plugin_command::Payload, BreakPanesToNewTabPayload, BreakPanesToTabWithIndexPayload,
         ChangeFloatingPanesCoordinatesPayload, ChangeHostFolderPayload,
-        ClearScreenForPaneIdPayload, CliPipeOutputPayload, CloseTabWithIndexPayload, CommandName,
-        ContextItem, EditScrollbackForPaneWithIdPayload, EnvVariable, ExecCmdPayload,
+        ClearScreenForPaneIdPayload, CliPipeOutputPayload, CloseMultiplePanesPayload,
+        CloseTabWithIndexPayload, CommandName, ContextItem,
+        CreateTokenResponse as ProtobufCreateTokenResponse, CreateTokenResponse,
+        EditScrollbackForPaneWithIdPayload, EmbedMultiplePanesPayload, EnvVariable, ExecCmdPayload,
         FixedOrPercent as ProtobufFixedOrPercent,
-        FixedOrPercentValue as ProtobufFixedOrPercentValue,
-        FloatingPaneCoordinates as ProtobufFloatingPaneCoordinates, HidePaneWithIdPayload,
-        HttpVerb as ProtobufHttpVerb, IdAndNewName, KeyToRebind, KeyToUnbind, KillSessionsPayload,
-        LoadNewPluginPayload, MessageToPluginPayload, MovePaneWithPaneIdInDirectionPayload,
-        MovePaneWithPaneIdPayload, MovePayload, NewPluginArgs as ProtobufNewPluginArgs,
+        FixedOrPercentValue as ProtobufFixedOrPercentValue, FloatMultiplePanesPayload,
+        FloatingPaneCoordinates as ProtobufFloatingPaneCoordinates, GenerateWebLoginTokenPayload,
+        GetPaneScrollbackPayload, GroupAndUngroupPanesPayload, HidePaneWithIdPayload,
+        HighlightAndUnhighlightPanesPayload, HttpVerb as ProtobufHttpVerb, IdAndNewName,
+        KeyToRebind, KeyToUnbind, KillSessionsPayload, ListTokensResponse, LoadNewPluginPayload,
+        MessageToPluginPayload, MovePaneWithPaneIdInDirectionPayload, MovePaneWithPaneIdPayload,
+        MovePayload, NewPluginArgs as ProtobufNewPluginArgs, NewTabPayload,
         NewTabsWithLayoutInfoPayload, OpenCommandPaneFloatingNearPluginPayload,
         OpenCommandPaneInPlaceOfPluginPayload, OpenCommandPaneNearPluginPayload,
         OpenCommandPanePayload, OpenFileFloatingNearPluginPayload, OpenFileInPlaceOfPluginPayload,
@@ -21,14 +25,16 @@ pub use super::generated_api::api::{
         PageScrollDownInPaneIdPayload, PageScrollUpInPaneIdPayload, PaneId as ProtobufPaneId,
         PaneIdAndFloatingPaneCoordinates, PaneType as ProtobufPaneType,
         PluginCommand as ProtobufPluginCommand, PluginMessagePayload, RebindKeysPayload,
-        ReconfigurePayload, ReloadPluginPayload, RequestPluginPermissionPayload,
+        ReconfigurePayload, ReloadPluginPayload, RenameWebLoginTokenPayload,
+        RenameWebTokenResponse, ReplacePaneWithExistingPanePayload, RequestPluginPermissionPayload,
         RerunCommandPanePayload, ResizePaneIdWithDirectionPayload, ResizePayload,
+        RevokeAllWebTokensResponse, RevokeTokenResponse, RevokeWebLoginTokenPayload,
         RunCommandPayload, ScrollDownInPaneIdPayload, ScrollToBottomInPaneIdPayload,
         ScrollToTopInPaneIdPayload, ScrollUpInPaneIdPayload, SetFloatingPanePinnedPayload,
-        SetTimeoutPayload, ShowPaneWithIdPayload, StackPanesPayload, SubscribePayload,
-        SwitchSessionPayload, SwitchTabToPayload, TogglePaneEmbedOrEjectForPaneIdPayload,
-        TogglePaneIdFullscreenPayload, UnsubscribePayload, WebRequestPayload,
-        WriteCharsToPaneIdPayload, WriteToPaneIdPayload,
+        SetSelfMouseSelectionSupportPayload, SetTimeoutPayload, ShowPaneWithIdPayload,
+        StackPanesPayload, SubscribePayload, SwitchSessionPayload, SwitchTabToPayload,
+        TogglePaneEmbedOrEjectForPaneIdPayload, TogglePaneIdFullscreenPayload, UnsubscribePayload,
+        WebRequestPayload, WriteCharsToPaneIdPayload, WriteToPaneIdPayload,
     },
     plugin_permission::PermissionType as ProtobufPermissionType,
     resize::ResizeAction as ProtobufResizeAction,
@@ -468,11 +474,18 @@ impl TryFrom<ProtobufPluginCommand> for PluginCommand {
                 },
                 _ => Err("Mismatched payload for NewTabsWithLayout"),
             },
-            Some(CommandName::NewTab) => {
-                if protobuf_plugin_command.payload.is_some() {
-                    return Err("NewTab should not have a payload");
-                }
-                Ok(PluginCommand::NewTab)
+            Some(CommandName::NewTab) => match protobuf_plugin_command.payload {
+                Some(Payload::NewTabPayload(protobuf_new_tab_payload)) => {
+                    Ok(PluginCommand::NewTab {
+                        name: protobuf_new_tab_payload.name,
+                        cwd: protobuf_new_tab_payload.cwd,
+                    })
+                },
+                None => Ok(PluginCommand::NewTab {
+                    name: None,
+                    cwd: None,
+                }),
+                _ => Err("Mismatched payload for NewTab"),
             },
             Some(CommandName::GoToNextTab) => {
                 if protobuf_plugin_command.payload.is_some() {
@@ -933,6 +946,7 @@ impl TryFrom<ProtobufPluginCommand> for PluginCommand {
                     message_args,
                     new_plugin_args,
                     destination_plugin_id,
+                    floating_pane_coordinates,
                 })) => {
                     let plugin_config: BTreeMap<String, String> = plugin_config
                         .into_iter()
@@ -957,9 +971,12 @@ impl TryFrom<ProtobufPluginCommand> for PluginCommand {
                                 pane_title: protobuf_new_plugin_args.pane_title,
                                 cwd: protobuf_new_plugin_args.cwd.map(|cwd| PathBuf::from(cwd)),
                                 skip_cache: protobuf_new_plugin_args.skip_cache,
+                                should_focus: protobuf_new_plugin_args.should_focus,
                             })
                         }),
                         destination_plugin_id,
+                        floating_pane_coordinates: floating_pane_coordinates
+                            .and_then(|f| f.try_into().ok()),
                     }))
                 },
                 _ => Err("Mismatched payload for MessageToPlugin"),
@@ -1091,6 +1108,18 @@ impl TryFrom<ProtobufPluginCommand> for PluginCommand {
                     _ => Err("Malformed edit_scrollback_for_pane_with_id payload"),
                 },
                 _ => Err("Mismatched payload for EditScrollback"),
+            },
+            Some(CommandName::GetPaneScrollback) => match protobuf_plugin_command.payload {
+                Some(Payload::GetPaneScrollbackPayload(get_pane_scrollback_payload)) => {
+                    match get_pane_scrollback_payload.pane_id {
+                        Some(pane_id) => Ok(PluginCommand::GetPaneScrollback {
+                            pane_id: pane_id.try_into()?,
+                            get_full_scrollback: get_pane_scrollback_payload.get_full_scrollback,
+                        }),
+                        _ => Err("Malformed get_pane_scrollback_payload"),
+                    }
+                },
+                _ => Err("Mismatched payload for GetPaneScrollback"),
             },
             Some(CommandName::WriteToPaneId) => match protobuf_plugin_command.payload {
                 Some(Payload::WriteToPaneIdPayload(write_to_pane_id_payload)) => {
@@ -1540,6 +1569,185 @@ impl TryFrom<ProtobufPluginCommand> for PluginCommand {
                 },
                 _ => Err("Mismatched payload for OpenFileInPlaceOfPlugin"),
             },
+            Some(CommandName::StartWebServer) => {
+                if protobuf_plugin_command.payload.is_some() {
+                    Err("StartWebServer should not have a payload")
+                } else {
+                    Ok(PluginCommand::StartWebServer)
+                }
+            },
+            Some(CommandName::StopWebServer) => {
+                if protobuf_plugin_command.payload.is_some() {
+                    Err("StopWebServer should not have a payload")
+                } else {
+                    Ok(PluginCommand::StopWebServer)
+                }
+            },
+            Some(CommandName::QueryWebServerStatus) => {
+                if protobuf_plugin_command.payload.is_some() {
+                    Err("QueryWebServerStatus should not have a payload")
+                } else {
+                    Ok(PluginCommand::QueryWebServerStatus)
+                }
+            },
+            Some(CommandName::GroupAndUngroupPanes) => match protobuf_plugin_command.payload {
+                Some(Payload::GroupAndUngroupPanesPayload(group_and_ungroup_panes_payload)) => {
+                    Ok(PluginCommand::GroupAndUngroupPanes(
+                        group_and_ungroup_panes_payload
+                            .pane_ids_to_group
+                            .into_iter()
+                            .filter_map(|p| p.try_into().ok())
+                            .collect(),
+                        group_and_ungroup_panes_payload
+                            .pane_ids_to_ungroup
+                            .into_iter()
+                            .filter_map(|p| p.try_into().ok())
+                            .collect(),
+                        group_and_ungroup_panes_payload.for_all_clients,
+                    ))
+                },
+                _ => Err("Mismatched payload for GroupAndUngroupPanes"),
+            },
+            Some(CommandName::HighlightAndUnhighlightPanes) => {
+                match protobuf_plugin_command.payload {
+                    Some(Payload::HighlightAndUnhighlightPanesPayload(
+                        highlight_and_unhighlight_panes_payload,
+                    )) => Ok(PluginCommand::HighlightAndUnhighlightPanes(
+                        highlight_and_unhighlight_panes_payload
+                            .pane_ids_to_highlight
+                            .into_iter()
+                            .filter_map(|p| p.try_into().ok())
+                            .collect(),
+                        highlight_and_unhighlight_panes_payload
+                            .pane_ids_to_unhighlight
+                            .into_iter()
+                            .filter_map(|p| p.try_into().ok())
+                            .collect(),
+                    )),
+                    _ => Err("Mismatched payload for HighlightAndUnhighlightPanes"),
+                }
+            },
+            Some(CommandName::CloseMultiplePanes) => match protobuf_plugin_command.payload {
+                Some(Payload::CloseMultiplePanesPayload(close_multiple_panes_payload)) => {
+                    Ok(PluginCommand::CloseMultiplePanes(
+                        close_multiple_panes_payload
+                            .pane_ids
+                            .into_iter()
+                            .filter_map(|p| p.try_into().ok())
+                            .collect(),
+                    ))
+                },
+                _ => Err("Mismatched payload for CloseMultiplePanes"),
+            },
+            Some(CommandName::FloatMultiplePanes) => match protobuf_plugin_command.payload {
+                Some(Payload::FloatMultiplePanesPayload(float_multiple_panes_payload)) => {
+                    Ok(PluginCommand::FloatMultiplePanes(
+                        float_multiple_panes_payload
+                            .pane_ids
+                            .into_iter()
+                            .filter_map(|p| p.try_into().ok())
+                            .collect(),
+                    ))
+                },
+                _ => Err("Mismatched payload for FloatMultiplePanes"),
+            },
+            Some(CommandName::EmbedMultiplePanes) => match protobuf_plugin_command.payload {
+                Some(Payload::EmbedMultiplePanesPayload(embed_multiple_panes_payload)) => {
+                    Ok(PluginCommand::EmbedMultiplePanes(
+                        embed_multiple_panes_payload
+                            .pane_ids
+                            .into_iter()
+                            .filter_map(|p| p.try_into().ok())
+                            .collect(),
+                    ))
+                },
+                _ => Err("Mismatched payload for EmbedMultiplePanes"),
+            },
+            Some(CommandName::ShareCurrentSession) => {
+                if protobuf_plugin_command.payload.is_some() {
+                    Err("ShareCurrentSession should not have a payload")
+                } else {
+                    Ok(PluginCommand::ShareCurrentSession)
+                }
+            },
+            Some(CommandName::StopSharingCurrentSession) => {
+                if protobuf_plugin_command.payload.is_some() {
+                    Err("StopSharingCurrentSession should not have a payload")
+                } else {
+                    Ok(PluginCommand::StopSharingCurrentSession)
+                }
+            },
+            Some(CommandName::SetSelfMouseSelectionSupport) => {
+                match protobuf_plugin_command.payload {
+                    Some(Payload::SetSelfMouseSelectionSupportPayload(
+                        set_self_mouse_selection_support_payload,
+                    )) => Ok(PluginCommand::SetSelfMouseSelectionSupport(
+                        set_self_mouse_selection_support_payload.support_mouse_selection,
+                    )),
+                    _ => Err("SetSelfMouseSelectionSupport requires a payload"),
+                }
+            },
+            Some(CommandName::GenerateWebLoginToken) => match protobuf_plugin_command.payload {
+                Some(Payload::GenerateWebLoginTokenPayload(generate_web_login_token_payload)) => {
+                    Ok(PluginCommand::GenerateWebLoginToken(
+                        generate_web_login_token_payload.token_label,
+                    ))
+                },
+                _ => Err("GenerateWebLoginToken requires a payload"),
+            },
+            Some(CommandName::RevokeWebLoginToken) => match protobuf_plugin_command.payload {
+                Some(Payload::RevokeWebLoginTokenPayload(revoke_web_login_token_payload)) => Ok(
+                    PluginCommand::RevokeWebLoginToken(revoke_web_login_token_payload.token_label),
+                ),
+                _ => Err("RevokeWebLoginToken requires a payload"),
+            },
+            Some(CommandName::ListWebLoginTokens) => {
+                if protobuf_plugin_command.payload.is_some() {
+                    Err("ListWebLoginTokens should not have a payload")
+                } else {
+                    Ok(PluginCommand::ListWebLoginTokens)
+                }
+            },
+            Some(CommandName::RevokeAllWebLoginTokens) => {
+                if protobuf_plugin_command.payload.is_some() {
+                    Err("RevokeAllWebLoginTokens should not have a payload")
+                } else {
+                    Ok(PluginCommand::RevokeAllWebLoginTokens)
+                }
+            },
+            Some(CommandName::RenameWebLoginToken) => match protobuf_plugin_command.payload {
+                Some(Payload::RenameWebLoginTokenPayload(rename_web_login_token_payload)) => {
+                    Ok(PluginCommand::RenameWebLoginToken(
+                        rename_web_login_token_payload.old_name,
+                        rename_web_login_token_payload.new_name,
+                    ))
+                },
+                _ => Err("RenameWebLoginToken requires a payload"),
+            },
+            Some(CommandName::InterceptKeyPresses) => match protobuf_plugin_command.payload {
+                Some(_) => Err("InterceptKeyPresses should have no payload, found a payload"),
+                None => Ok(PluginCommand::InterceptKeyPresses),
+            },
+            Some(CommandName::ClearKeyPressesIntercepts) => match protobuf_plugin_command.payload {
+                Some(_) => Err("ClearKeyPressesIntercepts should have no payload, found a payload"),
+                None => Ok(PluginCommand::ClearKeyPressesIntercepts),
+            },
+            Some(CommandName::ReplacePaneWithExistingPane) => match protobuf_plugin_command.payload
+            {
+                Some(Payload::ReplacePaneWithExistingPanePayload(
+                    replace_pane_with_other_pane_payload,
+                )) => Ok(PluginCommand::ReplacePaneWithExistingPane(
+                    replace_pane_with_other_pane_payload
+                        .pane_id_to_replace
+                        .and_then(|p_id| PaneId::try_from(p_id).ok())
+                        .ok_or("Failed to parse ReplacePaneWithExistingPanePayload")?,
+                    replace_pane_with_other_pane_payload
+                        .existing_pane_id
+                        .and_then(|p_id| PaneId::try_from(p_id).ok())
+                        .ok_or("Failed to parse ReplacePaneWithExistingPanePayload")?,
+                )),
+                _ => Err("Mismatched payload for ReplacePaneWithExistingPane"),
+            },
             None => Err("Unrecognized plugin command"),
         }
     }
@@ -1699,9 +1907,9 @@ impl TryFrom<PluginCommand> for ProtobufPluginCommand {
                 name: CommandName::NewTabsWithLayout as i32,
                 payload: Some(Payload::NewTabsWithLayoutPayload(raw_layout)),
             }),
-            PluginCommand::NewTab => Ok(ProtobufPluginCommand {
+            PluginCommand::NewTab { name, cwd } => Ok(ProtobufPluginCommand {
                 name: CommandName::NewTab as i32,
-                payload: None,
+                payload: Some(Payload::NewTabPayload(NewTabPayload { name, cwd })),
             }),
             PluginCommand::GoToNextTab => Ok(ProtobufPluginCommand {
                 name: CommandName::GoToNextTab as i32,
@@ -2066,9 +2274,13 @@ impl TryFrom<PluginCommand> for ProtobufPluginCommand {
                                 pane_title: m_t_p.pane_title,
                                 cwd: m_t_p.cwd.map(|cwd| cwd.display().to_string()),
                                 skip_cache: m_t_p.skip_cache,
+                                should_focus: m_t_p.should_focus,
                             }
                         }),
                         destination_plugin_id: message_to_plugin.destination_plugin_id,
+                        floating_pane_coordinates: message_to_plugin
+                            .floating_pane_coordinates
+                            .and_then(|f| f.try_into().ok()),
                     })),
                 })
             },
@@ -2170,6 +2382,18 @@ impl TryFrom<PluginCommand> for ProtobufPluginCommand {
                 payload: Some(Payload::EditScrollbackForPaneWithIdPayload(
                     EditScrollbackForPaneWithIdPayload {
                         pane_id: Some(pane_id.try_into()?),
+                    },
+                )),
+            }),
+            PluginCommand::GetPaneScrollback {
+                pane_id,
+                get_full_scrollback,
+            } => Ok(ProtobufPluginCommand {
+                name: CommandName::GetPaneScrollback as i32,
+                payload: Some(Payload::GetPaneScrollbackPayload(
+                    GetPaneScrollbackPayload {
+                        pane_id: Some(pane_id.try_into()?),
+                        get_full_scrollback,
                     },
                 )),
             }),
@@ -2551,6 +2775,143 @@ impl TryFrom<PluginCommand> for ProtobufPluginCommand {
                     },
                 )),
             }),
+            PluginCommand::GroupAndUngroupPanes(
+                panes_to_group,
+                panes_to_ungroup,
+                for_all_clients,
+            ) => Ok(ProtobufPluginCommand {
+                name: CommandName::GroupAndUngroupPanes as i32,
+                payload: Some(Payload::GroupAndUngroupPanesPayload(
+                    GroupAndUngroupPanesPayload {
+                        pane_ids_to_group: panes_to_group
+                            .iter()
+                            .filter_map(|&p| p.try_into().ok())
+                            .collect(),
+                        pane_ids_to_ungroup: panes_to_ungroup
+                            .iter()
+                            .filter_map(|&p| p.try_into().ok())
+                            .collect(),
+                        for_all_clients,
+                    },
+                )),
+            }),
+            PluginCommand::StartWebServer => Ok(ProtobufPluginCommand {
+                name: CommandName::StartWebServer as i32,
+                payload: None,
+            }),
+            PluginCommand::StopWebServer => Ok(ProtobufPluginCommand {
+                name: CommandName::StopWebServer as i32,
+                payload: None,
+            }),
+            PluginCommand::QueryWebServerStatus => Ok(ProtobufPluginCommand {
+                name: CommandName::QueryWebServerStatus as i32,
+                payload: None,
+            }),
+            PluginCommand::HighlightAndUnhighlightPanes(
+                panes_to_highlight,
+                panes_to_unhighlight,
+            ) => Ok(ProtobufPluginCommand {
+                name: CommandName::HighlightAndUnhighlightPanes as i32,
+                payload: Some(Payload::HighlightAndUnhighlightPanesPayload(
+                    HighlightAndUnhighlightPanesPayload {
+                        pane_ids_to_highlight: panes_to_highlight
+                            .iter()
+                            .filter_map(|&p| p.try_into().ok())
+                            .collect(),
+                        pane_ids_to_unhighlight: panes_to_unhighlight
+                            .iter()
+                            .filter_map(|&p| p.try_into().ok())
+                            .collect(),
+                    },
+                )),
+            }),
+            PluginCommand::CloseMultiplePanes(pane_ids) => Ok(ProtobufPluginCommand {
+                name: CommandName::CloseMultiplePanes as i32,
+                payload: Some(Payload::CloseMultiplePanesPayload(
+                    CloseMultiplePanesPayload {
+                        pane_ids: pane_ids.iter().filter_map(|&p| p.try_into().ok()).collect(),
+                    },
+                )),
+            }),
+            PluginCommand::FloatMultiplePanes(pane_ids) => Ok(ProtobufPluginCommand {
+                name: CommandName::FloatMultiplePanes as i32,
+                payload: Some(Payload::FloatMultiplePanesPayload(
+                    FloatMultiplePanesPayload {
+                        pane_ids: pane_ids.iter().filter_map(|&p| p.try_into().ok()).collect(),
+                    },
+                )),
+            }),
+            PluginCommand::EmbedMultiplePanes(pane_ids) => Ok(ProtobufPluginCommand {
+                name: CommandName::EmbedMultiplePanes as i32,
+                payload: Some(Payload::EmbedMultiplePanesPayload(
+                    EmbedMultiplePanesPayload {
+                        pane_ids: pane_ids.iter().filter_map(|&p| p.try_into().ok()).collect(),
+                    },
+                )),
+            }),
+            PluginCommand::ShareCurrentSession => Ok(ProtobufPluginCommand {
+                name: CommandName::ShareCurrentSession as i32,
+                payload: None,
+            }),
+            PluginCommand::StopSharingCurrentSession => Ok(ProtobufPluginCommand {
+                name: CommandName::StopSharingCurrentSession as i32,
+                payload: None,
+            }),
+            PluginCommand::SetSelfMouseSelectionSupport(support_mouse_selection) => {
+                Ok(ProtobufPluginCommand {
+                    name: CommandName::SetSelfMouseSelectionSupport as i32,
+                    payload: Some(Payload::SetSelfMouseSelectionSupportPayload(
+                        SetSelfMouseSelectionSupportPayload {
+                            support_mouse_selection,
+                        },
+                    )),
+                })
+            },
+            PluginCommand::GenerateWebLoginToken(token_label) => Ok(ProtobufPluginCommand {
+                name: CommandName::GenerateWebLoginToken as i32,
+                payload: Some(Payload::GenerateWebLoginTokenPayload(
+                    GenerateWebLoginTokenPayload { token_label },
+                )),
+            }),
+            PluginCommand::RevokeWebLoginToken(token_label) => Ok(ProtobufPluginCommand {
+                name: CommandName::RevokeWebLoginToken as i32,
+                payload: Some(Payload::RevokeWebLoginTokenPayload(
+                    RevokeWebLoginTokenPayload { token_label },
+                )),
+            }),
+            PluginCommand::ListWebLoginTokens => Ok(ProtobufPluginCommand {
+                name: CommandName::ListWebLoginTokens as i32,
+                payload: None,
+            }),
+            PluginCommand::RevokeAllWebLoginTokens => Ok(ProtobufPluginCommand {
+                name: CommandName::RevokeAllWebLoginTokens as i32,
+                payload: None,
+            }),
+            PluginCommand::RenameWebLoginToken(old_name, new_name) => Ok(ProtobufPluginCommand {
+                name: CommandName::RenameWebLoginToken as i32,
+                payload: Some(Payload::RenameWebLoginTokenPayload(
+                    RenameWebLoginTokenPayload { old_name, new_name },
+                )),
+            }),
+            PluginCommand::InterceptKeyPresses => Ok(ProtobufPluginCommand {
+                name: CommandName::InterceptKeyPresses as i32,
+                payload: None,
+            }),
+            PluginCommand::ClearKeyPressesIntercepts => Ok(ProtobufPluginCommand {
+                name: CommandName::ClearKeyPressesIntercepts as i32,
+                payload: None,
+            }),
+            PluginCommand::ReplacePaneWithExistingPane(pane_id_to_replace, existing_pane_id) => {
+                Ok(ProtobufPluginCommand {
+                    name: CommandName::ReplacePaneWithExistingPane as i32,
+                    payload: Some(Payload::ReplacePaneWithExistingPanePayload(
+                        ReplacePaneWithExistingPanePayload {
+                            pane_id_to_replace: ProtobufPaneId::try_from(pane_id_to_replace).ok(),
+                            existing_pane_id: ProtobufPaneId::try_from(existing_pane_id).ok(),
+                        },
+                    )),
+                })
+            },
         }
     }
 }

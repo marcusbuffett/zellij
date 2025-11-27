@@ -14,7 +14,7 @@ use crate::{
     ClientId,
 };
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 use zellij_utils::{
     data::{Palette, Style},
@@ -30,7 +30,7 @@ pub struct LayoutApplier<'a> {
     terminal_emulator_colors: Rc<RefCell<Palette>>,
     terminal_emulator_color_codes: Rc<RefCell<HashMap<usize, String>>>,
     character_cell_size: Rc<RefCell<Option<SizeInPixels>>>,
-    connected_clients: Rc<RefCell<HashSet<ClientId>>>,
+    connected_clients: Rc<RefCell<HashMap<ClientId, bool>>>,
     style: Style,
     display_area: Rc<RefCell<Size>>, // includes all panes (including eg. the status bar and tab bar in the default layout)
     tiled_panes: &'a mut TiledPanes,
@@ -53,7 +53,7 @@ impl<'a> LayoutApplier<'a> {
         terminal_emulator_colors: &Rc<RefCell<Palette>>,
         terminal_emulator_color_codes: &Rc<RefCell<HashMap<usize, String>>>,
         character_cell_size: &Rc<RefCell<Option<SizeInPixels>>>,
-        connected_clients: &Rc<RefCell<HashSet<ClientId>>>,
+        connected_clients: &Rc<RefCell<HashMap<ClientId, bool>>>,
         style: &Style,
         display_area: &Rc<RefCell<Size>>, // includes all panes (including eg. the status bar and tab bar in the default layout)
         tiled_panes: &'a mut TiledPanes,
@@ -319,9 +319,10 @@ impl<'a> LayoutApplier<'a> {
                 .assign_geom_for_pane_with_run(run_instruction);
         }
         for (unused_pid, _) in new_terminal_ids {
-            let _ = self
-                .senders
-                .send_to_pty(PtyInstruction::ClosePane(PaneId::Terminal(*unused_pid)));
+            let _ = self.senders.send_to_pty(PtyInstruction::ClosePane(
+                PaneId::Terminal(*unused_pid),
+                None,
+            ));
         }
     }
     fn new_tiled_plugin_pane(
@@ -352,7 +353,7 @@ impl<'a> LayoutApplier<'a> {
             self.terminal_emulator_color_codes.clone(),
             self.link_handler.clone(),
             self.character_cell_size.clone(),
-            self.connected_clients.borrow().iter().copied().collect(),
+            self.connected_clients.borrow().keys().copied().collect(),
             self.style,
             layout.run.clone(),
             self.debug,
@@ -401,7 +402,7 @@ impl<'a> LayoutApplier<'a> {
             self.terminal_emulator_color_codes.clone(),
             self.link_handler.clone(),
             self.character_cell_size.clone(),
-            self.connected_clients.borrow().iter().copied().collect(),
+            self.connected_clients.borrow().keys().copied().collect(),
             self.style,
             floating_pane_layout.run.clone(),
             self.debug,
@@ -458,6 +459,7 @@ impl<'a> LayoutApplier<'a> {
             self.arrow_fonts,
             self.styled_underlines,
             self.explicitly_disable_kitty_keyboard_protocol,
+            None,
         );
         if let Some(pane_initial_contents) = &floating_pane_layout.pane_initial_contents {
             new_pane.handle_pty_bytes(pane_initial_contents.as_bytes().into());
@@ -511,6 +513,7 @@ impl<'a> LayoutApplier<'a> {
             self.arrow_fonts,
             self.styled_underlines,
             self.explicitly_disable_kitty_keyboard_protocol,
+            None,
         );
         if let Some(pane_initial_contents) = &layout.pane_initial_contents {
             new_pane.handle_pty_bytes(pane_initial_contents.as_bytes().into());

@@ -14,4 +14,7 @@ enum PermissionType {
   MessageAndLaunchOtherPlugins = 8;
   Reconfigure = 9;
   FullHdAccess = 10;
+  StartWebServer = 11;
+  InterceptInput = 12;
+  ReadPaneContents = 13;
 }

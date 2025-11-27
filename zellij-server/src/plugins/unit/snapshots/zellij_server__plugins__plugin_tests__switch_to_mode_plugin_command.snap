@@ -1,6 +1,5 @@
 ---
 source: zellij-server/src/plugins/./unit/plugin_tests.rs
-assertion_line: 1143
 expression: "format!(\"{:#?}\", switch_to_mode_event)"
 ---
 Some(
@@ -222,10 +221,10 @@ Some(
                             154,
                         ),
                         emphasis_0: EightBit(
-                            154,
+                            201,
                         ),
                         emphasis_1: EightBit(
-                            154,
+                            99,
                         ),
                         emphasis_2: EightBit(
                             154,
@@ -318,7 +317,20 @@ Some(
             ),
             editor: None,
             shell: None,
+            web_clients_allowed: None,
+            web_sharing: None,
+            currently_marking_pane_group: None,
+            is_web_client: None,
+            web_server_ip: None,
+            web_server_port: None,
+            web_server_capability: None,
         },
         1,
+        Some(
+            NotificationEnd {
+                channel: None,
+                exit_status: None,
+            },
+        ),
     ),
 )

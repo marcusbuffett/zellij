@@ -5,6 +5,61 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ## [Unreleased]
+* fix: meta key handling in web client (https://github.com/zellij-org/zellij/pull/4376)
+* refactor: move logical structures from client to server (https://github.com/zellij-org/zellij/pull/4383)
+* fix: make sessions compatible across versions (https://github.com/zellij-org/zellij/pull/4439)
+* fix: occasional status-bar pop-out after resurrecting a session (https://github.com/zellij-org/zellij/pull/4440)
+* fix: properly serialize/resurrect layouts with one-line split panes (https://github.com/zellij-org/zellij/pull/4442)
+* feat: allow attaching to remote Zellij sessions over https (eg. `zellij attach https://example.com/my-cool-session`) (https://github.com/zellij-org/zellij/pull/4460)
+* build: Update Rust toolchain to 1.90.0 (https://github.com/zellij-org/zellij/pull/4457)
+* feat: allow plugins to read pane scrollback (https://github.com/zellij-org/zellij/pull/4465)
+* infra: migrate wasm runtime from wasmtime to wasmi (https://github.com/zellij-org/zellij/pull/4449)
+* feat: allow attaching to sessions as "read-only" (https://github.com/zellij-org/zellij/pull/4487)
+* feat: improve cli interface (add detach, switch-session and more) (https://github.com/zellij-org/zellij/pull/4492)
+
+## [0.43.1] - 2025-08-08
+* fix: pane rename backspace regression (https://github.com/zellij-org/zellij/pull/4346)
+* fix: Zellij Web login issue with safari (https://github.com/zellij-org/zellij/pull/4345)
+* fix: terminal title regression (https://github.com/zellij-org/zellij/pull/4352)
+* fix: resurrection listing regression (https://github.com/zellij-org/zellij/pull/4354)
+* fix: tooltip keybinding backgrounds (https://github.com/zellij-org/zellij/pull/4356)
+* fix: default to session name for window/tab title in Zellij Web (https://github.com/zellij-org/zellij/pull/4357)
+* fix: handle omitted flags in the push sequence of the KKP (https://github.com/zellij-org/zellij/pull/4334)
+
+## [0.43.0] - 2025-08-05
+* feat: multiple select and bulk pane actions (https://github.com/zellij-org/zellij/pull/4169 and https://github.com/zellij-org/zellij/pull/4171, https://github.com/zellij-org/zellij/pull/4221 and https://github.com/zellij-org/zellij/pull/4286)
+* feat: add an optional key tooltip to show the current keybindings for the compact bar (https://github.com/zellij-org/zellij/pull/4225 and https://github.com/zellij-org/zellij/pull/4279)
+* feat: web-client, allowing users to share sessions in the browser (https://github.com/zellij-org/zellij/pull/4242, https://github.com/zellij-org/zellij/pull/4257 and https://github.com/zellij-org/zellij/pull/4278)
+* performance: consolidate renders (https://github.com/zellij-org/zellij/pull/4245)
+* feat: add plugin API to replace a pane with another existing pane (https://github.com/zellij-org/zellij/pull/4246)
+* feat: add "stack" keybinding and CLI action to add a stacked pane to the current pane (https://github.com/zellij-org/zellij/pull/4255)
+* fix: support multiline hyperlinks (https://github.com/zellij-org/zellij/pull/4264)
+* fix: use terminal title when spawning terminal panes from plugin (https://github.com/zellij-org/zellij/pull/4272)
+* fix: allow specifying CWD for tabs without necessitating a layout (https://github.com/zellij-org/zellij/pull/4273)
+* fix: don't serialize when only ui elements present and provide post command disovery hook (https://github.com/zellij-org/zellij/pull/4276)
+* fix: use plugin `/host` folder as cwd when opening new panes (https://github.com/zellij-org/zellij/pull/4290)
+* fix: better command detection when serializing layouts for resurrection (https://github.com/zellij-org/zellij/pull/4287)
+* fix: slow startup on very large caches (https://github.com/zellij-org/zellij/pull/4292)
+* fix: don't show popups in the welcome screen (https://github.com/zellij-org/zellij/pull/4294)
+* fix: reap processes when using an external clipboard tool (https://github.com/zellij-org/zellij/pull/4298)
+* fix: out of bounds mouse release events (https://github.com/zellij-org/zellij/pull/4300)
+* fix: account for emoji/widechars when double/triple-clicking to mark words (https://github.com/zellij-org/zellij/pull/4302)
+* fix: allow pasting and emojis in tab/pane names and pasting in search (https://github.com/zellij-org/zellij/pull/4303)
+* fix: stack pane ordering when stacking multiple panes (https://github.com/zellij-org/zellij/pull/4308)
+* fix: normalize focusing of plugins launched through pipes (https://github.com/zellij-org/zellij/pull/4309)
+* performance: improve dumping screen for when editing scrollback with $EDITOR (https://github.com/zellij-org/zellij/pull/2548)
+* fix: properly truncate status bar secondary info (https://github.com/zellij-org/zellij/pull/4313)
+
+## [0.42.2] - 2025-04-15
+* refactor(terminal): track scroll_region as tuple rather than Option (https://github.com/zellij-org/zellij/pull/4082)
+* chore(deps): Use workspace dependencies (https://github.com/zellij-org/zellij/pull/4085)
+* build: Don't use default features (https://github.com/zellij-org/zellij/pull/4086)
+* build: Don't re-export foreign crates (https://github.com/zellij-org/zellij/pull/4087)
+* performance(terminal): reduce render count to mitigate flickering issues in apps that don't implement synchronized renders (https://github.com/zellij-org/zellij/pull/4100)
+* fix(build): update wit/wasm-parser to get around a breaking change in the rust compiler (https://github.com/zellij-org/zellij/pull/4118)
+
+## [0.42.1] - 2025-03-21
+* fix(mouse): fix mouse handling in windows terminal (https://github.com/zellij-org/zellij/pull/4076)
 
 ## [0.42.0] - 2025-03-17
 * fix(plugins): properly focus pane after tab was closed in the plugin API (https://github.com/zellij-org/zellij/pull/3797)

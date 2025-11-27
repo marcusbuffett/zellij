@@ -7,20 +7,25 @@ mod layout_applier;
 mod swap_layouts;
 
 use copy_command::CopyCommand;
+use serde;
 use std::env::temp_dir;
+use std::net::IpAddr;
 use std::path::PathBuf;
 use uuid::Uuid;
+use zellij_utils::data::PaneContents;
 use zellij_utils::data::{
-    Direction, KeyWithModifier, PaneInfo, PermissionStatus, PermissionType, PluginPermission,
-    ResizeStrategy,
+    Direction, KeyWithModifier, NewPanePlacement, PaneInfo, PermissionStatus, PermissionType,
+    PluginPermission, ResizeStrategy, WebSharing,
 };
 use zellij_utils::errors::prelude::*;
 use zellij_utils::input::command::RunCommand;
 use zellij_utils::input::mouse::{MouseEvent, MouseEventType};
+use zellij_utils::position::Position;
 use zellij_utils::position::{Column, Line};
-use zellij_utils::{position::Position, serde};
+use zellij_utils::shared::clean_string_from_control_and_linebreak;
 
 use crate::background_jobs::BackgroundJob;
+use crate::pane_groups::PaneGroups;
 use crate::pty_writer::PtyWriteInstruction;
 use crate::screen::CopyOptions;
 use crate::ui::{loading_indication::LoadingIndication, pane_boundaries_frame::FrameParams};
@@ -28,6 +33,7 @@ use layout_applier::LayoutApplier;
 use swap_layouts::SwapLayouts;
 
 use self::clipboard::ClipboardProvider;
+use crate::route::NotificationEnd;
 use crate::{
     os_input_output::ServerOsApi,
     output::{CharacterChunk, Output, SixelImageChunk},
@@ -45,7 +51,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Instant;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     str,
 };
 use zellij_utils::{
@@ -151,6 +157,9 @@ enum BufferedTabInstruction {
 pub struct MouseEffect {
     pub state_changed: bool,
     pub leave_clipboard_message: bool,
+    pub group_toggle: Option<PaneId>,
+    pub group_add: Option<PaneId>,
+    pub ungroup: bool,
 }
 
 impl MouseEffect {
@@ -158,18 +167,54 @@ impl MouseEffect {
         MouseEffect {
             state_changed: true,
             leave_clipboard_message: false,
+            group_toggle: None,
+            group_add: None,
+            ungroup: false,
         }
     }
     pub fn leave_clipboard_message() -> Self {
         MouseEffect {
             state_changed: false,
             leave_clipboard_message: true,
+            group_toggle: None,
+            group_add: None,
+            ungroup: false,
         }
     }
     pub fn state_changed_and_leave_clipboard_message() -> Self {
         MouseEffect {
             state_changed: true,
             leave_clipboard_message: true,
+            group_toggle: None,
+            group_add: None,
+            ungroup: false,
+        }
+    }
+    pub fn group_toggle(pane_id: PaneId) -> Self {
+        MouseEffect {
+            state_changed: true,
+            leave_clipboard_message: false,
+            group_toggle: Some(pane_id),
+            group_add: None,
+            ungroup: false,
+        }
+    }
+    pub fn group_add(pane_id: PaneId) -> Self {
+        MouseEffect {
+            state_changed: true,
+            leave_clipboard_message: false,
+            group_toggle: None,
+            group_add: Some(pane_id),
+            ungroup: false,
+        }
+    }
+    pub fn ungroup() -> Self {
+        MouseEffect {
+            state_changed: true,
+            leave_clipboard_message: false,
+            group_toggle: None,
+            group_add: None,
+            ungroup: true,
         }
     }
 }
@@ -221,6 +266,17 @@ pub(crate) struct Tab {
     arrow_fonts: bool,
     styled_underlines: bool,
     explicitly_disable_kitty_keyboard_protocol: bool,
+    web_clients_allowed: bool,
+    web_sharing: WebSharing,
+    mouse_hover_pane_id: HashMap<ClientId, PaneId>,
+    current_pane_group: Rc<RefCell<PaneGroups>>,
+    advanced_mouse_actions: bool,
+    currently_marking_pane_group: Rc<RefCell<HashMap<ClientId, bool>>>,
+    connected_clients_in_app: Rc<RefCell<HashMap<ClientId, bool>>>, // bool -> is_web_client
+    // the below are the configured values - the ones that will be set if and when the web server
+    // is brought online
+    web_server_ip: IpAddr,
+    web_server_port: u16,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -298,7 +354,7 @@ pub trait Pane {
     fn pull_left(&mut self, count: usize);
     fn pull_up(&mut self, count: usize);
     fn clear_screen(&mut self);
-    fn dump_screen(&self, _full: bool) -> String {
+    fn dump_screen(&self, _full: bool, _client_id: Option<ClientId>) -> String {
         "".to_owned()
     }
     fn scroll_up(&mut self, count: usize, client_id: ClientId);
@@ -324,8 +380,11 @@ pub trait Pane {
     fn start_selection(&mut self, _start: &Position, _client_id: ClientId) {}
     fn update_selection(&mut self, _position: &Position, _client_id: ClientId) {}
     fn end_selection(&mut self, _end: &Position, _client_id: ClientId) {}
-    fn reset_selection(&mut self) {}
-    fn get_selected_text(&self) -> Option<String> {
+    fn reset_selection(&mut self, _client_id: Option<ClientId>) {}
+    fn supports_mouse_selection(&self) -> bool {
+        true
+    }
+    fn get_selected_text(&self, _client_id: ClientId) -> Option<String> {
         None
     }
 
@@ -525,7 +584,13 @@ pub trait Pane {
         // No-op by default, only terminal panes support holding
     }
     fn add_red_pane_frame_color_override(&mut self, _error_text: Option<String>);
-    fn clear_pane_frame_color_override(&mut self);
+    fn add_highlight_pane_frame_color_override(
+        &mut self,
+        _text: Option<String>,
+        _client_id: Option<ClientId>,
+    ) {
+    }
+    fn clear_pane_frame_color_override(&mut self, _client_id: Option<ClientId>);
     fn frame_color_override(&self) -> Option<PaletteColor>;
     fn invoked_with(&self) -> &Option<Run>;
     fn set_title(&mut self, title: String);
@@ -563,6 +628,13 @@ pub trait Pane {
     fn toggle_pinned(&mut self) {}
     fn set_pinned(&mut self, _should_be_pinned: bool) {}
     fn reset_logical_position(&mut self) {}
+    fn set_mouse_selection_support(&mut self, _selection_support: bool) {}
+    fn pane_contents(
+        &self,
+        client_id: Option<ClientId>,
+        _get_full_scrollback: bool,
+    ) -> PaneContents;
+    fn update_exit_status(&mut self, _exit_status: i32) {}
 }
 
 #[derive(Clone, Debug)]
@@ -613,7 +685,7 @@ impl Tab {
         default_mode_info: ModeInfo,
         draw_pane_frames: bool,
         auto_layout: bool,
-        connected_clients_in_app: Rc<RefCell<HashSet<ClientId>>>,
+        connected_clients_in_app: Rc<RefCell<HashMap<ClientId, bool>>>, // bool -> is_web_client
         session_is_mirrored: bool,
         client_id: Option<ClientId>,
         copy_options: CopyOptions,
@@ -626,6 +698,13 @@ impl Tab {
         styled_underlines: bool,
         explicitly_disable_kitty_keyboard_protocol: bool,
         default_editor: Option<PathBuf>,
+        web_clients_allowed: bool,
+        web_sharing: WebSharing,
+        current_pane_group: Rc<RefCell<PaneGroups>>,
+        currently_marking_pane_group: Rc<RefCell<HashMap<ClientId, bool>>>,
+        advanced_mouse_actions: bool,
+        web_server_ip: IpAddr,
+        web_server_port: u16,
     ) -> Self {
         let name = if name.is_empty() {
             format!("Tab #{}", index + 1)
@@ -662,7 +741,7 @@ impl Tab {
             display_area.clone(),
             viewport.clone(),
             connected_clients.clone(),
-            connected_clients_in_app,
+            connected_clients_in_app.clone(),
             mode_info.clone(),
             character_cell_size.clone(),
             session_is_mirrored,
@@ -720,6 +799,15 @@ impl Tab {
             styled_underlines,
             explicitly_disable_kitty_keyboard_protocol,
             default_editor,
+            web_clients_allowed,
+            web_sharing,
+            mouse_hover_pane_id: HashMap::new(),
+            current_pane_group,
+            currently_marking_pane_group,
+            advanced_mouse_actions,
+            connected_clients_in_app,
+            web_server_ip,
+            web_server_port,
         }
     }
 
@@ -742,7 +830,7 @@ impl Tab {
             &self.terminal_emulator_colors,
             &self.terminal_emulator_color_codes,
             &self.character_cell_size,
-            &self.connected_clients,
+            &self.connected_clients_in_app,
             &self.style,
             &self.display_area,
             &mut self.tiled_panes,
@@ -765,10 +853,10 @@ impl Tab {
         ) {
             Ok(should_show_floating_panes) => {
                 if should_show_floating_panes && !self.floating_panes.panes_are_visible() {
-                    self.toggle_floating_panes(Some(client_id), None)
+                    self.toggle_floating_panes(Some(client_id), None, None)
                         .non_fatal();
                 } else if !should_show_floating_panes && self.floating_panes.panes_are_visible() {
-                    self.toggle_floating_panes(Some(client_id), None)
+                    self.toggle_floating_panes(Some(client_id), None, None)
                         .non_fatal();
                 }
                 self.tiled_panes.reapply_pane_frames();
@@ -812,7 +900,7 @@ impl Tab {
                 &self.terminal_emulator_colors,
                 &self.terminal_emulator_color_codes,
                 &self.character_cell_size,
-                &self.connected_clients,
+                &self.connected_clients_in_app,
                 &self.style,
                 &self.display_area,
                 &mut self.tiled_panes,
@@ -829,6 +917,9 @@ impl Tab {
             .non_fatal();
         }
         self.set_force_render();
+        self.senders
+            .send_to_pty_writer(PtyWriteInstruction::ApplyCachedResizes)
+            .with_context(|| format!("failed to apply cached resizes"))?;
         Ok(())
     }
     fn relayout_tiled_panes(&mut self, search_backwards: bool) -> Result<()> {
@@ -847,7 +938,7 @@ impl Tab {
                 &self.terminal_emulator_colors,
                 &self.terminal_emulator_color_codes,
                 &self.character_cell_size,
-                &self.connected_clients,
+                &self.connected_clients_in_app,
                 &self.style,
                 &self.display_area,
                 &mut self.tiled_panes,
@@ -873,6 +964,9 @@ impl Tab {
         // we do this so that the new swap layout has a chance to pass through the constraint system
         self.tiled_panes.resize(display_area);
         self.set_should_clear_display_before_rendering();
+        self.senders
+            .send_to_pty_writer(PtyWriteInstruction::ApplyCachedResizes)
+            .with_context(|| format!("failed to apply cached resizes"))?;
         Ok(())
     }
     pub fn previous_swap_layout(&mut self) -> Result<()> {
@@ -882,9 +976,6 @@ impl Tab {
         } else {
             self.relayout_tiled_panes(search_backwards)?;
         }
-        self.senders
-            .send_to_pty_writer(PtyWriteInstruction::ApplyCachedResizes)
-            .with_context(|| format!("failed to update plugins with mode info"))?;
         Ok(())
     }
     pub fn next_swap_layout(&mut self) -> Result<()> {
@@ -894,9 +985,6 @@ impl Tab {
         } else {
             self.relayout_tiled_panes(search_backwards)?;
         }
-        self.senders
-            .send_to_pty_writer(PtyWriteInstruction::ApplyCachedResizes)
-            .with_context(|| format!("failed to update plugins with mode info"))?;
         Ok(())
     }
     pub fn apply_buffered_instructions(&mut self) -> Result<()> {
@@ -936,6 +1024,7 @@ impl Tab {
         // this updates all plugins with the client's input mode
         let mode_infos = self.mode_info.borrow();
         let mut plugin_updates = vec![];
+        let currently_marking_pane_group = self.currently_marking_pane_group.borrow();
         for client_id in self.connected_clients.borrow().iter() {
             let mut mode_info = mode_infos
                 .get(client_id)
@@ -943,6 +1032,22 @@ impl Tab {
                 .clone();
             mode_info.shell = Some(self.default_shell.clone());
             mode_info.editor = self.default_editor.clone();
+            mode_info.web_clients_allowed = Some(self.web_clients_allowed);
+            mode_info.web_sharing = Some(self.web_sharing);
+            mode_info.currently_marking_pane_group =
+                currently_marking_pane_group.get(client_id).copied();
+            mode_info.web_server_ip = Some(self.web_server_ip);
+            mode_info.web_server_port = Some(self.web_server_port);
+            mode_info.is_web_client = self
+                .connected_clients_in_app
+                .borrow()
+                .get(&client_id)
+                .copied();
+            if cfg!(feature = "web_server_capability") {
+                mode_info.web_server_capability = Some(true);
+            } else {
+                mode_info.web_server_capability = Some(false);
+            }
             plugin_updates.push((None, Some(*client_id), Event::ModeUpdate(mode_info)));
         }
         self.senders
@@ -1016,6 +1121,10 @@ impl Tab {
     }
     pub fn remove_client(&mut self, client_id: ClientId) {
         self.focus_pane_id = None;
+        self.mode_info
+            .borrow_mut()
+            .get_mut(&client_id)
+            .map(|c| c.change_to_default_mode()); // TODO: no races?
         self.connected_clients.borrow_mut().remove(&client_id);
         self.set_force_render();
     }
@@ -1043,6 +1152,9 @@ impl Tab {
     }
     pub fn has_no_connected_clients(&self) -> bool {
         self.connected_clients.borrow().is_empty()
+    }
+    pub fn pane_id_is_floating(&self, pane_id: &PaneId) -> bool {
+        self.floating_panes.panes_contain(pane_id)
     }
     pub fn toggle_pane_embed_or_floating(&mut self, client_id: ClientId) -> Result<()> {
         let err_context =
@@ -1079,7 +1191,11 @@ impl Tab {
         }
         Ok(())
     }
-    pub fn toggle_pane_embed_or_floating_for_pane_id(&mut self, pane_id: PaneId) -> Result<()> {
+    pub fn toggle_pane_embed_or_floating_for_pane_id(
+        &mut self,
+        pane_id: PaneId,
+        client_id: Option<ClientId>,
+    ) -> Result<()> {
         let err_context = || {
             format!(
                 "failed to toggle embedded/floating pane for pane_id {:?}",
@@ -1097,7 +1213,7 @@ impl Tab {
                         format!("failed to find floating pane (ID: {pane_id:?}) to embed",)
                     })
                     .with_context(err_context)?;
-                self.add_tiled_pane(floating_pane_to_embed, pane_id, None)?;
+                self.add_tiled_pane(floating_pane_to_embed, pane_id, client_id)?;
             }
         } else if self.tiled_panes.panes_contain(&pane_id) {
             if self.get_selectable_tiled_panes().count() <= 1 {
@@ -1115,28 +1231,28 @@ impl Tab {
         &mut self,
         client_id: Option<ClientId>,
         default_shell: Option<TerminalAction>,
+        completion_tx: Option<NotificationEnd>,
     ) -> Result<()> {
         if self.floating_panes.panes_are_visible() {
             self.hide_floating_panes();
             self.set_force_render();
         } else {
             self.show_floating_panes();
-            match self.floating_panes.last_floating_pane_id() {
-                Some(first_floating_pane_id) => match client_id {
+            match self.floating_panes.last_selectable_floating_pane_id() {
+                Some(last_selectable_floating_pane_id) => match client_id {
                     Some(client_id) => {
                         if !self.floating_panes.active_panes_contain(&client_id) {
                             self.floating_panes
-                                .focus_pane(first_floating_pane_id, client_id);
+                                .focus_pane(last_selectable_floating_pane_id, client_id);
                         }
                     },
                     None => {
                         self.floating_panes
-                            .focus_pane_for_all_clients(first_floating_pane_id);
+                            .focus_pane_for_all_clients(last_selectable_floating_pane_id);
                     },
                 },
                 None => {
                     let name = None;
-                    let should_float = true;
                     let client_id_or_tab_index = match client_id {
                         Some(client_id) => ClientTabIndexOrPaneId::ClientId(client_id),
                         None => ClientTabIndexOrPaneId::TabIndex(self.index),
@@ -1144,11 +1260,12 @@ impl Tab {
                     let should_start_suppressed = false;
                     let instruction = PtyInstruction::SpawnTerminal(
                         default_shell,
-                        Some(should_float),
                         name,
-                        None,
+                        NewPanePlacement::Floating(None),
                         should_start_suppressed,
                         client_id_or_tab_index,
+                        completion_tx,
+                        false, // set_blocking
                     );
                     self.senders
                         .send_to_pty(instruction)
@@ -1164,18 +1281,96 @@ impl Tab {
         &mut self,
         pid: PaneId,
         initial_pane_title: Option<String>,
-        should_float: Option<bool>,
         invoked_with: Option<Run>,
-        floating_pane_coordinates: Option<FloatingPaneCoordinates>,
         start_suppressed: bool,
+        should_focus_pane: bool,
+        new_pane_placement: NewPanePlacement,
         client_id: Option<ClientId>,
+        blocking_notification: Option<NotificationEnd>,
+    ) -> Result<()> {
+        match new_pane_placement {
+            NewPanePlacement::NoPreference => self.new_no_preference_pane(
+                pid,
+                initial_pane_title,
+                invoked_with,
+                start_suppressed,
+                should_focus_pane,
+                client_id,
+                blocking_notification,
+            ),
+            NewPanePlacement::Tiled(None) => self.new_tiled_pane(
+                pid,
+                initial_pane_title,
+                invoked_with,
+                start_suppressed,
+                should_focus_pane,
+                client_id,
+                blocking_notification,
+            ),
+            NewPanePlacement::Tiled(Some(direction)) => {
+                if let Some(client_id) = client_id {
+                    if direction == Direction::Left || direction == Direction::Right {
+                        self.vertical_split(
+                            pid,
+                            initial_pane_title,
+                            client_id,
+                            blocking_notification,
+                        )?;
+                    } else {
+                        self.horizontal_split(
+                            pid,
+                            initial_pane_title,
+                            client_id,
+                            blocking_notification,
+                        )?;
+                    }
+                }
+                Ok(())
+            },
+            NewPanePlacement::Floating(floating_pane_coordinates) => self.new_floating_pane(
+                pid,
+                initial_pane_title,
+                invoked_with,
+                start_suppressed,
+                should_focus_pane,
+                floating_pane_coordinates,
+                blocking_notification,
+            ),
+            NewPanePlacement::InPlace {
+                pane_id_to_replace,
+                close_replaced_pane,
+            } => self.new_in_place_pane(
+                pid,
+                initial_pane_title,
+                invoked_with,
+                pane_id_to_replace.map(|id| id.into()),
+                close_replaced_pane,
+                client_id,
+                blocking_notification,
+            ),
+            NewPanePlacement::Stacked(pane_id_to_stack_under) => self.new_stacked_pane(
+                pid,
+                initial_pane_title,
+                invoked_with,
+                start_suppressed,
+                should_focus_pane,
+                pane_id_to_stack_under.map(|id| id.into()),
+                client_id,
+                blocking_notification,
+            ),
+        }
+    }
+    pub fn new_no_preference_pane(
+        &mut self,
+        pid: PaneId,
+        initial_pane_title: Option<String>,
+        invoked_with: Option<Run>,
+        start_suppressed: bool,
+        should_focus_pane: bool,
+        client_id: Option<ClientId>,
+        blocking_notification: Option<NotificationEnd>,
     ) -> Result<()> {
         let err_context = || format!("failed to create new pane with id {pid:?}");
-        match should_float {
-            Some(true) => self.show_floating_panes(),
-            Some(false) => self.hide_floating_panes(),
-            None => {},
-        };
         self.close_down_to_max_terminals()
             .with_context(err_context)?;
         let mut new_pane = match pid {
@@ -1198,6 +1393,7 @@ impl Tab {
                     self.arrow_fonts,
                     self.styled_underlines,
                     self.explicitly_disable_kitty_keyboard_protocol,
+                    blocking_notification,
                 )) as Box<dyn Pane>
             },
             PaneId::Plugin(plugin_pid) => {
@@ -1216,7 +1412,11 @@ impl Tab {
                     self.terminal_emulator_color_codes.clone(),
                     self.link_handler.clone(),
                     self.character_cell_size.clone(),
-                    self.connected_clients.borrow().iter().copied().collect(),
+                    self.connected_clients_in_app
+                        .borrow()
+                        .keys()
+                        .copied()
+                        .collect(),
                     self.style,
                     invoked_with,
                     self.debug,
@@ -1250,10 +1450,362 @@ impl Tab {
             self.suppressed_panes
                 .insert(pid, (is_scrollback_editor, new_pane));
             Ok(())
-        } else if self.floating_panes.panes_are_visible() {
-            self.add_floating_pane(new_pane, pid, floating_pane_coordinates, true)
+        } else if should_focus_pane {
+            if self.floating_panes.panes_are_visible() {
+                self.add_floating_pane(new_pane, pid, None, true)
+            } else {
+                self.add_tiled_pane(new_pane, pid, client_id)
+            }
+        } else {
+            if self.floating_panes.panes_are_visible() {
+                self.add_floating_pane(new_pane, pid, None, false)
+            } else {
+                self.add_tiled_pane(new_pane, pid, client_id)
+            }
+        }
+    }
+    pub fn new_tiled_pane(
+        &mut self,
+        pid: PaneId,
+        initial_pane_title: Option<String>,
+        invoked_with: Option<Run>,
+        start_suppressed: bool,
+        should_focus_pane: bool,
+        client_id: Option<ClientId>,
+        blocking_notification: Option<NotificationEnd>,
+    ) -> Result<()> {
+        let err_context = || format!("failed to create new pane with id {pid:?}");
+        if should_focus_pane {
+            self.hide_floating_panes();
+        }
+        self.close_down_to_max_terminals()
+            .with_context(err_context)?;
+        let mut new_pane = match pid {
+            PaneId::Terminal(term_pid) => {
+                let next_terminal_position = self.get_next_terminal_position();
+                Box::new(TerminalPane::new(
+                    term_pid,
+                    PaneGeom::default(), // this will be filled out later
+                    self.style,
+                    next_terminal_position,
+                    String::new(),
+                    self.link_handler.clone(),
+                    self.character_cell_size.clone(),
+                    self.sixel_image_store.clone(),
+                    self.terminal_emulator_colors.clone(),
+                    self.terminal_emulator_color_codes.clone(),
+                    initial_pane_title,
+                    invoked_with,
+                    self.debug,
+                    self.arrow_fonts,
+                    self.styled_underlines,
+                    self.explicitly_disable_kitty_keyboard_protocol,
+                    blocking_notification,
+                )) as Box<dyn Pane>
+            },
+            PaneId::Plugin(plugin_pid) => {
+                Box::new(PluginPane::new(
+                    plugin_pid,
+                    PaneGeom::default(), // this will be filled out later
+                    self.senders
+                        .to_plugin
+                        .as_ref()
+                        .with_context(err_context)?
+                        .clone(),
+                    initial_pane_title.unwrap_or("".to_owned()),
+                    String::new(),
+                    self.sixel_image_store.clone(),
+                    self.terminal_emulator_colors.clone(),
+                    self.terminal_emulator_color_codes.clone(),
+                    self.link_handler.clone(),
+                    self.character_cell_size.clone(),
+                    self.connected_clients_in_app
+                        .borrow()
+                        .keys()
+                        .copied()
+                        .collect(),
+                    self.style,
+                    invoked_with,
+                    self.debug,
+                    self.arrow_fonts,
+                    self.styled_underlines,
+                )) as Box<dyn Pane>
+            },
+        };
+
+        if start_suppressed {
+            // this pane needs to start in the background (suppressed), only accessible if a plugin takes it out
+            // of there in one way or another
+            // we need to do some bookkeeping for this pane, namely setting its geom and
+            // content_offset so that things will appear properly in the terminal - we set it to
+            // the default geom of the first floating pane - this is just in order to give it some
+            // reasonable size, when it is shown - if needed - it will be given the proper geom as if it were
+            // resized
+            let viewport = { self.viewport.borrow().clone() };
+            let new_pane_geom = half_size_middle_geom(&viewport, 0);
+            new_pane.set_active_at(Instant::now());
+            new_pane.set_geom(new_pane_geom);
+            new_pane.set_content_offset(Offset::frame(1));
+            resize_pty!(
+                new_pane,
+                self.os_api,
+                self.senders,
+                self.character_cell_size
+            )
+            .with_context(err_context)?;
+            let is_scrollback_editor = false;
+            self.suppressed_panes
+                .insert(pid, (is_scrollback_editor, new_pane));
+            Ok(())
         } else {
             self.add_tiled_pane(new_pane, pid, client_id)
+        }
+    }
+    pub fn new_floating_pane(
+        &mut self,
+        pid: PaneId,
+        initial_pane_title: Option<String>,
+        invoked_with: Option<Run>,
+        start_suppressed: bool,
+        should_focus_pane: bool,
+        floating_pane_coordinates: Option<FloatingPaneCoordinates>,
+        blocking_notification: Option<NotificationEnd>,
+    ) -> Result<()> {
+        let err_context = || format!("failed to create new pane with id {pid:?}");
+        if should_focus_pane {
+            self.show_floating_panes();
+        }
+        self.close_down_to_max_terminals()
+            .with_context(err_context)?;
+        let mut new_pane = match pid {
+            PaneId::Terminal(term_pid) => {
+                let next_terminal_position = self.get_next_terminal_position();
+                Box::new(TerminalPane::new(
+                    term_pid,
+                    PaneGeom::default(), // this will be filled out later
+                    self.style,
+                    next_terminal_position,
+                    String::new(),
+                    self.link_handler.clone(),
+                    self.character_cell_size.clone(),
+                    self.sixel_image_store.clone(),
+                    self.terminal_emulator_colors.clone(),
+                    self.terminal_emulator_color_codes.clone(),
+                    initial_pane_title,
+                    invoked_with,
+                    self.debug,
+                    self.arrow_fonts,
+                    self.styled_underlines,
+                    self.explicitly_disable_kitty_keyboard_protocol,
+                    blocking_notification,
+                )) as Box<dyn Pane>
+            },
+            PaneId::Plugin(plugin_pid) => {
+                Box::new(PluginPane::new(
+                    plugin_pid,
+                    PaneGeom::default(), // this will be filled out later
+                    self.senders
+                        .to_plugin
+                        .as_ref()
+                        .with_context(err_context)?
+                        .clone(),
+                    initial_pane_title.unwrap_or("".to_owned()),
+                    String::new(),
+                    self.sixel_image_store.clone(),
+                    self.terminal_emulator_colors.clone(),
+                    self.terminal_emulator_color_codes.clone(),
+                    self.link_handler.clone(),
+                    self.character_cell_size.clone(),
+                    self.connected_clients_in_app
+                        .borrow()
+                        .keys()
+                        .copied()
+                        .collect(),
+                    self.style,
+                    invoked_with,
+                    self.debug,
+                    self.arrow_fonts,
+                    self.styled_underlines,
+                )) as Box<dyn Pane>
+            },
+        };
+
+        if start_suppressed {
+            // this pane needs to start in the background (suppressed), only accessible if a plugin takes it out
+            // of there in one way or another
+            // we need to do some bookkeeping for this pane, namely setting its geom and
+            // content_offset so that things will appear properly in the terminal - we set it to
+            // the default geom of the first floating pane - this is just in order to give it some
+            // reasonable size, when it is shown - if needed - it will be given the proper geom as if it were
+            // resized
+            let viewport = { self.viewport.borrow().clone() };
+            let new_pane_geom = half_size_middle_geom(&viewport, 0);
+            new_pane.set_active_at(Instant::now());
+            new_pane.set_geom(new_pane_geom);
+            new_pane.set_content_offset(Offset::frame(1));
+            resize_pty!(
+                new_pane,
+                self.os_api,
+                self.senders,
+                self.character_cell_size
+            )
+            .with_context(err_context)?;
+            let is_scrollback_editor = false;
+            self.suppressed_panes
+                .insert(pid, (is_scrollback_editor, new_pane));
+            Ok(())
+        } else {
+            self.add_floating_pane(new_pane, pid, floating_pane_coordinates, should_focus_pane)
+        }
+    }
+    pub fn new_in_place_pane(
+        &mut self,
+        pid: PaneId,
+        initial_pane_title: Option<String>,
+        invoked_with: Option<Run>,
+        pane_id_to_replace: Option<PaneId>,
+        close_replaced_pane: bool,
+        client_id: Option<ClientId>,
+        blocking_notification: Option<NotificationEnd>,
+    ) -> Result<()> {
+        match (pane_id_to_replace, client_id) {
+            (Some(pane_id_to_replace), _) => {
+                self.suppress_pane_and_replace_with_pid(
+                    pane_id_to_replace,
+                    pid,
+                    close_replaced_pane,
+                    invoked_with,
+                    blocking_notification,
+                )?;
+            },
+            (None, Some(client_id)) => match self.get_active_pane_id(client_id) {
+                Some(active_pane_id) => {
+                    self.suppress_pane_and_replace_with_pid(
+                        active_pane_id,
+                        pid,
+                        close_replaced_pane,
+                        invoked_with,
+                        blocking_notification,
+                    )?;
+                },
+                None => {
+                    log::error!("Cannot find active pane");
+                },
+            },
+            _ => {
+                log::error!("Must have pane id to replace or client id to start pane in place>");
+            },
+        }
+        if let Some(initial_pane_title) = initial_pane_title {
+            let _ = self.rename_pane(initial_pane_title.as_bytes().to_vec(), pid);
+        }
+        Ok(())
+    }
+    pub fn new_stacked_pane(
+        &mut self,
+        pid: PaneId,
+        initial_pane_title: Option<String>,
+        invoked_with: Option<Run>,
+        start_suppressed: bool,
+        should_focus_pane: bool,
+        pane_id_to_stack_under: Option<PaneId>,
+        client_id: Option<ClientId>,
+        blocking_notification: Option<NotificationEnd>,
+    ) -> Result<()> {
+        let err_context = || format!("failed to create new pane with id {pid:?}");
+        if should_focus_pane {
+            self.hide_floating_panes();
+        }
+        self.close_down_to_max_terminals()
+            .with_context(err_context)?;
+        let mut new_pane = match pid {
+            PaneId::Terminal(term_pid) => {
+                let next_terminal_position = self.get_next_terminal_position();
+                Box::new(TerminalPane::new(
+                    term_pid,
+                    PaneGeom::default(), // this will be filled out later
+                    self.style,
+                    next_terminal_position,
+                    String::new(),
+                    self.link_handler.clone(),
+                    self.character_cell_size.clone(),
+                    self.sixel_image_store.clone(),
+                    self.terminal_emulator_colors.clone(),
+                    self.terminal_emulator_color_codes.clone(),
+                    initial_pane_title,
+                    invoked_with,
+                    self.debug,
+                    self.arrow_fonts,
+                    self.styled_underlines,
+                    self.explicitly_disable_kitty_keyboard_protocol,
+                    blocking_notification,
+                )) as Box<dyn Pane>
+            },
+            PaneId::Plugin(plugin_pid) => {
+                Box::new(PluginPane::new(
+                    plugin_pid,
+                    PaneGeom::default(), // this will be filled out later
+                    self.senders
+                        .to_plugin
+                        .as_ref()
+                        .with_context(err_context)?
+                        .clone(),
+                    initial_pane_title.unwrap_or("".to_owned()),
+                    String::new(),
+                    self.sixel_image_store.clone(),
+                    self.terminal_emulator_colors.clone(),
+                    self.terminal_emulator_color_codes.clone(),
+                    self.link_handler.clone(),
+                    self.character_cell_size.clone(),
+                    self.connected_clients_in_app
+                        .borrow()
+                        .keys()
+                        .copied()
+                        .collect(),
+                    self.style,
+                    invoked_with,
+                    self.debug,
+                    self.arrow_fonts,
+                    self.styled_underlines,
+                )) as Box<dyn Pane>
+            },
+        };
+
+        if start_suppressed {
+            // this pane needs to start in the background (suppressed), only accessible if a plugin takes it out
+            // of there in one way or another
+            // we need to do some bookkeeping for this pane, namely setting its geom and
+            // content_offset so that things will appear properly in the terminal - we set it to
+            // the default geom of the first floating pane - this is just in order to give it some
+            // reasonable size, when it is shown - if needed - it will be given the proper geom as if it were
+            // resized
+            let viewport = { self.viewport.borrow().clone() };
+            let new_pane_geom = half_size_middle_geom(&viewport, 0);
+            new_pane.set_active_at(Instant::now());
+            new_pane.set_geom(new_pane_geom);
+            new_pane.set_content_offset(Offset::frame(1));
+            resize_pty!(
+                new_pane,
+                self.os_api,
+                self.senders,
+                self.character_cell_size
+            )
+            .with_context(err_context)?;
+            let is_scrollback_editor = false;
+            self.suppressed_panes
+                .insert(pid, (is_scrollback_editor, new_pane));
+            Ok(())
+        } else {
+            if let Some(pane_id_to_stack_under) = pane_id_to_stack_under {
+                // TODO: also focus pane if should_focus_pane? in cases where we did this from the CLI in an unfocused
+                // pane...
+                self.add_stacked_pane_to_pane_id(new_pane, pid, pane_id_to_stack_under)
+            } else if let Some(client_id) = client_id {
+                self.add_stacked_pane_to_active_pane(new_pane, pid, client_id)
+            } else {
+                log::error!("Must have client id or pane id to stack pane");
+                return Ok(());
+            }
         }
     }
     pub fn replace_active_pane_with_editor_pane(
@@ -1368,6 +1920,7 @@ impl Tab {
         new_pane_id: PaneId,
         close_replaced_pane: bool,
         run: Option<Run>,
+        completion_tx: Option<NotificationEnd>,
     ) -> Result<()> {
         // this method creates a new pane from pid and replaces it with the active pane
         // the active pane is then suppressed (hidden and not rendered) until the current
@@ -1394,6 +1947,7 @@ impl Tab {
                     self.arrow_fonts,
                     self.styled_underlines,
                     self.explicitly_disable_kitty_keyboard_protocol,
+                    completion_tx,
                 );
                 let replaced_pane = if self.floating_panes.panes_contain(&old_pane_id) {
                     self.floating_panes
@@ -1406,7 +1960,7 @@ impl Tab {
                 if close_replaced_pane {
                     if let Some(pid) = replaced_pane.as_ref().map(|p| p.pid()) {
                         self.senders
-                            .send_to_pty(PtyInstruction::ClosePane(pid))
+                            .send_to_pty(PtyInstruction::ClosePane(pid, None))
                             .with_context(err_context)?;
                     }
                     drop(replaced_pane);
@@ -1451,7 +2005,11 @@ impl Tab {
                     self.terminal_emulator_color_codes.clone(),
                     self.link_handler.clone(),
                     self.character_cell_size.clone(),
-                    self.connected_clients.borrow().iter().copied().collect(),
+                    self.connected_clients_in_app
+                        .borrow()
+                        .keys()
+                        .copied()
+                        .collect(),
                     self.style,
                     run,
                     self.debug,
@@ -1496,11 +2054,39 @@ impl Tab {
         }
         Ok(())
     }
+    pub fn close_pane_and_replace_with_other_pane(
+        &mut self,
+        pane_id_to_replace: PaneId,
+        pane_to_replace_with: Box<dyn Pane>,
+        completion_tx: Option<NotificationEnd>,
+    ) {
+        let mut replaced_pane = if self.floating_panes.panes_contain(&pane_id_to_replace) {
+            self.floating_panes
+                .replace_pane(pane_id_to_replace, pane_to_replace_with)
+                .ok()
+        } else {
+            self.tiled_panes
+                .replace_pane(pane_id_to_replace, pane_to_replace_with)
+        };
+        if let Some(replaced_pane) = replaced_pane.take() {
+            let pane_id = replaced_pane.pid();
+            let _ = self
+                .senders
+                .send_to_pty(PtyInstruction::ClosePane(pane_id, completion_tx));
+            let _ = self.senders.send_to_plugin(PluginInstruction::Update(vec![(
+                None,
+                None,
+                Event::PaneClosed(pane_id.into()),
+            )]));
+            drop(replaced_pane);
+        }
+    }
     pub fn horizontal_split(
         &mut self,
         pid: PaneId,
         initial_pane_title: Option<String>,
         client_id: ClientId,
+        completion_tx: Option<NotificationEnd>,
     ) -> Result<()> {
         let err_context =
             || format!("failed to split pane {pid:?} horizontally for client {client_id}");
@@ -1532,6 +2118,7 @@ impl Tab {
                     self.arrow_fonts,
                     self.styled_underlines,
                     self.explicitly_disable_kitty_keyboard_protocol,
+                    completion_tx,
                 );
                 self.tiled_panes
                     .split_pane_horizontally(pid, Box::new(new_terminal), client_id);
@@ -1550,7 +2137,7 @@ impl Tab {
                     .with_context(err_context)?;
             }
             self.senders
-                .send_to_pty(PtyInstruction::ClosePane(pid))
+                .send_to_pty(PtyInstruction::ClosePane(pid, completion_tx))
                 .with_context(err_context)?;
             return Ok(());
         }
@@ -1561,6 +2148,7 @@ impl Tab {
         pid: PaneId,
         initial_pane_title: Option<String>,
         client_id: ClientId,
+        completion_tx: Option<NotificationEnd>,
     ) -> Result<()> {
         let err_context =
             || format!("failed to split pane {pid:?} vertically for client {client_id}");
@@ -1592,6 +2180,7 @@ impl Tab {
                     self.arrow_fonts,
                     self.styled_underlines,
                     self.explicitly_disable_kitty_keyboard_protocol,
+                    completion_tx,
                 );
                 self.tiled_panes
                     .split_pane_vertically(pid, Box::new(new_terminal), client_id);
@@ -1610,7 +2199,7 @@ impl Tab {
                     .with_context(err_context)?;
             }
             self.senders
-                .send_to_pty(PtyInstruction::ClosePane(pid))
+                .send_to_pty(PtyInstruction::ClosePane(pid, completion_tx))
                 .with_context(err_context)?;
             return Ok(());
         }
@@ -1827,6 +2416,7 @@ impl Tab {
                     raw_input_bytes_are_kitty,
                     pane_id,
                     Some(client_id),
+                    None,
                 )
                 .context("failed to write to terminals on current tab")?;
             if ui_change_triggered {
@@ -1874,6 +2464,7 @@ impl Tab {
             raw_input_bytes_are_kitty,
             pane_id,
             Some(client_id),
+            None,
         )
         .with_context(|| format!("failed to write to active terminal for client {client_id}"))
     }
@@ -1892,7 +2483,7 @@ impl Tab {
                 .get_pane_id_at(position, false)
                 .with_context(err_context)?;
             if let Some(pane_id) = pane_id {
-                self.write_to_pane_id(&None, input_bytes, false, pane_id, Some(client_id))
+                self.write_to_pane_id(&None, input_bytes, false, pane_id, Some(client_id), None)
                     .with_context(err_context)?;
                 return Ok(());
             }
@@ -1902,7 +2493,7 @@ impl Tab {
             .get_pane_id_at(position, false)
             .with_context(err_context)?;
         if let Some(pane_id) = pane_id {
-            self.write_to_pane_id(&None, input_bytes, false, pane_id, Some(client_id))
+            self.write_to_pane_id(&None, input_bytes, false, pane_id, Some(client_id), None)
                 .with_context(err_context)?;
             return Ok(());
         }
@@ -1916,6 +2507,7 @@ impl Tab {
         raw_input_bytes_are_kitty: bool,
         pane_id: PaneId,
         client_id: Option<ClientId>,
+        completion_tx: Option<NotificationEnd>,
     ) -> Result<bool> {
         // returns true if we need to update the UI (eg. when a command pane is closed with ctrl-c)
         let err_context = || format!("failed to write to pane with id {pane_id:?}");
@@ -1963,12 +2555,13 @@ impl Tab {
                             .send_to_pty(PtyInstruction::ReRunCommandInPane(
                                 PaneId::Terminal(active_terminal_id),
                                 command,
+                                completion_tx,
                             ))
                             .with_context(err_context)?;
                         should_update_ui = true;
                     },
                     Some(AdjustedInput::CloseThisPane) => {
-                        self.close_pane(PaneId::Terminal(active_terminal_id), false);
+                        self.close_pane(PaneId::Terminal(active_terminal_id), false, None);
                         should_update_ui = true;
                     },
                     Some(AdjustedInput::DropToShellInThisPane { working_dir }) => {
@@ -1978,6 +2571,7 @@ impl Tab {
                                 pane_id: PaneId::Terminal(active_terminal_id),
                                 shell: Some(self.default_shell.clone()),
                                 working_dir,
+                                completion_tx,
                             })
                             .with_context(err_context)?;
                         should_update_ui = true;
@@ -2192,11 +2786,21 @@ impl Tab {
         Ok(())
     }
 
-    pub fn render(&mut self, output: &mut Output) -> Result<()> {
+    pub fn render(
+        &mut self,
+        output: &mut Output,
+        client_id_override: Option<ClientId>,
+    ) -> Result<()> {
         let err_context = || "failed to render tab".to_string();
 
-        let connected_clients: HashSet<ClientId> =
+        let mut connected_clients: HashSet<ClientId> =
             { self.connected_clients.borrow().iter().copied().collect() };
+
+        // If we have a client_id_override (for watcher rendering), add it temporarily
+        if let Some(override_id) = client_id_override {
+            connected_clients.insert(override_id);
+        }
+
         if connected_clients.is_empty() || !self.tiled_panes.has_active_panes() {
             return Ok(());
         }
@@ -2210,14 +2814,27 @@ impl Tab {
             floating_panes_stack,
         );
 
+        let current_pane_group: HashMap<ClientId, Vec<PaneId>> =
+            { self.current_pane_group.borrow().clone_inner() };
         self.tiled_panes
-            .render(output, self.floating_panes.panes_are_visible())
+            .render(
+                output,
+                self.floating_panes.panes_are_visible(),
+                &self.mouse_hover_pane_id,
+                current_pane_group.clone(),
+                client_id_override,
+            )
             .with_context(err_context)?;
         if (self.floating_panes.panes_are_visible() && self.floating_panes.has_active_panes())
             || self.floating_panes.has_pinned_panes()
         {
             self.floating_panes
-                .render(output)
+                .render(
+                    output,
+                    &self.mouse_hover_pane_id,
+                    current_pane_group,
+                    client_id_override,
+                )
                 .with_context(err_context)?;
         }
 
@@ -2729,9 +3346,9 @@ impl Tab {
             let terminals = self.get_tiled_pane_ids();
             for &pid in terminals.iter().skip(max_panes - 1) {
                 self.senders
-                    .send_to_pty(PtyInstruction::ClosePane(pid))
+                    .send_to_pty(PtyInstruction::ClosePane(pid, None))
                     .context("failed to close down to max terminals")?;
-                self.close_pane(pid, false);
+                self.close_pane(pid, false, None);
             }
         }
         Ok(())
@@ -2778,6 +3395,8 @@ impl Tab {
                 // is opened
                 self.tiled_panes.move_clients_out_of_pane(id);
             }
+        } else if let Some(pane) = self.floating_panes.get_pane_mut(id) {
+            pane.set_selectable(selectable);
         }
         // we do this here because if there is a non-selectable pane on the edge, we consider it
         // outside the viewport (a ui-pane, eg. the status-bar and tab-bar) and need to adjust for it
@@ -2787,7 +3406,17 @@ impl Tab {
             self.draw_pane_frames,
         );
     }
-    pub fn close_pane(&mut self, id: PaneId, ignore_suppressed_panes: bool) {
+    pub fn set_mouse_selection_support(&mut self, pane_id: PaneId, selection_support: bool) {
+        if let Some(pane) = self.get_pane_with_id_mut(pane_id) {
+            pane.set_mouse_selection_support(selection_support);
+        }
+    }
+    pub fn close_pane(
+        &mut self,
+        id: PaneId,
+        ignore_suppressed_panes: bool,
+        exit_status: Option<i32>,
+    ) {
         // we need to ignore suppressed panes when we toggle a pane to be floating/embedded(tiled)
         // this is because in that case, while we do use this logic, we're not actually closing the
         // pane, we're moving it
@@ -2801,10 +3430,10 @@ impl Tab {
                 },
             };
         }
-        if self.floating_panes.panes_contain(&id) {
-            let _closed_pane = self.floating_panes.remove_pane(id);
+        let closed_pane = if self.floating_panes.panes_contain(&id) {
+            let closed_pane = self.floating_panes.remove_pane(id);
             self.floating_panes.move_clients_out_of_pane(id);
-            if !self.floating_panes.has_panes() {
+            if !self.floating_panes.has_selectable_panes() {
                 self.swap_layouts.reset_floating_damage();
                 self.hide_floating_panes();
             }
@@ -2817,22 +3446,30 @@ impl Tab {
                 self.swap_layouts.set_is_floating_damaged();
                 // only relayout if the user is already "in" a layout, otherwise this might be
                 // confusing
-                let _ = self.next_swap_layout();
+                let _ = self.relayout_floating_panes(false);
             }
+            closed_pane
         } else {
             if self.tiled_panes.fullscreen_is_active() {
                 self.tiled_panes.unset_fullscreen();
             }
-            let _closed_pane = self.tiled_panes.remove_pane(id);
+            let closed_pane = self.tiled_panes.remove_pane(id);
             self.set_force_render();
             self.tiled_panes.set_force_render();
             if self.auto_layout && !self.swap_layouts.is_tiled_damaged() {
                 self.swap_layouts.set_is_tiled_damaged();
                 // only relayout if the user is already "in" a layout, otherwise this might be
                 // confusing
-                let _ = self.next_swap_layout();
+                let _ = self.relayout_tiled_panes(false);
             }
+            closed_pane
         };
+        if let Some(exit_status) = exit_status {
+            if let Some(mut closed_pane) = closed_pane {
+                // in case we need to update on Drop
+                closed_pane.update_exit_status(exit_status);
+            }
+        }
         let _ = self.senders.send_to_plugin(PluginInstruction::Update(vec![(
             None,
             None,
@@ -2878,7 +3515,7 @@ impl Tab {
                 self.swap_layouts.set_is_floating_damaged();
                 // only relayout if the user is already "in" a layout, otherwise this might be
                 // confusing
-                let _ = self.next_swap_layout();
+                let _ = self.relayout_floating_panes(false);
             }
             // we do this so that the logical index will not affect ordering in the target tab
             if let Some(closed_pane) = closed_pane.as_mut() {
@@ -2896,7 +3533,7 @@ impl Tab {
                 self.swap_layouts.set_is_tiled_damaged();
                 // only relayout if the user is already "in" a layout, otherwise this might be
                 // confusing
-                let _ = self.next_swap_layout();
+                let _ = self.relayout_tiled_panes(false);
             }
             // we do this so that the logical index will not affect ordering in the target tab
             if let Some(closed_pane) = closed_pane.as_mut() {
@@ -2984,24 +3621,31 @@ impl Tab {
                 )
             })
     }
-    pub fn close_focused_pane(&mut self, client_id: ClientId) -> Result<()> {
+    pub fn close_focused_pane(
+        &mut self,
+        client_id: ClientId,
+        completion_tx: Option<NotificationEnd>,
+    ) -> Result<()> {
         let err_context = |pane_id| {
             format!("failed to close focused pane (ID {pane_id:?}) for client {client_id}")
         };
 
         if self.floating_panes.panes_are_visible() {
             if let Some(active_floating_pane_id) = self.floating_panes.active_pane_id(client_id) {
-                self.close_pane(active_floating_pane_id, false);
+                self.close_pane(active_floating_pane_id, false, None);
                 self.senders
-                    .send_to_pty(PtyInstruction::ClosePane(active_floating_pane_id))
+                    .send_to_pty(PtyInstruction::ClosePane(
+                        active_floating_pane_id,
+                        completion_tx,
+                    ))
                     .with_context(|| err_context(active_floating_pane_id))?;
                 return Ok(());
             }
         }
         if let Some(active_pane_id) = self.tiled_panes.get_active_pane_id(client_id) {
-            self.close_pane(active_pane_id, false);
+            self.close_pane(active_pane_id, false, None);
             self.senders
-                .send_to_pty(PtyInstruction::ClosePane(active_pane_id))
+                .send_to_pty(PtyInstruction::ClosePane(active_pane_id, completion_tx))
                 .with_context(|| err_context(active_pane_id))?;
         }
         Ok(())
@@ -3027,7 +3671,7 @@ impl Tab {
             || format!("failed to dump active terminal screen for client {client_id}");
 
         if let Some(active_pane) = self.get_active_pane_or_floating_pane_mut(client_id) {
-            let dump = active_pane.dump_screen(full);
+            let dump = active_pane.dump_screen(full, Some(client_id));
             self.os_api
                 .write_to_file(dump, file)
                 .with_context(err_context)?;
@@ -3041,12 +3685,16 @@ impl Tab {
         full: bool,
     ) -> Result<()> {
         if let Some(pane) = self.get_pane_with_id(pane_id) {
-            let dump = pane.dump_screen(full);
+            let dump = pane.dump_screen(full, None);
             self.os_api.write_to_file(dump, file).non_fatal()
         }
         Ok(())
     }
-    pub fn edit_scrollback(&mut self, client_id: ClientId) -> Result<()> {
+    pub fn edit_scrollback(
+        &mut self,
+        client_id: ClientId,
+        completion_tx: Option<NotificationEnd>,
+    ) -> Result<()> {
         let err_context = || format!("failed to edit scrollback for client {client_id}");
 
         let mut file = temp_dir();
@@ -3065,10 +3713,15 @@ impl Tab {
                 file,
                 line_number,
                 ClientTabIndexOrPaneId::ClientId(client_id),
+                completion_tx,
             ))
             .with_context(err_context)
     }
-    pub fn edit_scrollback_for_pane_with_id(&mut self, pane_id: PaneId) -> Result<()> {
+    pub fn edit_scrollback_for_pane_with_id(
+        &mut self,
+        pane_id: PaneId,
+        completion_tx: Option<NotificationEnd>,
+    ) -> Result<()> {
         if let PaneId::Terminal(_terminal_pane_id) = pane_id {
             let mut file = temp_dir();
             file.push(format!("{}.dump", Uuid::new_v4()));
@@ -3081,6 +3734,7 @@ impl Tab {
                 file,
                 line_number,
                 ClientTabIndexOrPaneId::PaneId(pane_id),
+                completion_tx,
             ))
         } else {
             log::error!("Editing plugin pane scrollback is currently unsupported.");
@@ -3460,6 +4114,13 @@ impl Tab {
                 .ok_or_else(|| anyhow!("Failed to find pane at position"))?
                 .pid();
             match event.event_type {
+                MouseEventType::Press if event.alt => {
+                    self.mouse_hover_pane_id.remove(&client_id);
+                    Ok(MouseEffect::group_toggle(pane_id_at_position))
+                },
+                MouseEventType::Motion if event.alt => {
+                    Ok(MouseEffect::group_add(pane_id_at_position))
+                },
                 MouseEventType::Press => {
                     if pane_id_at_position == active_pane_id {
                         self.handle_active_pane_left_mouse_press(event, client_id)
@@ -3474,6 +4135,9 @@ impl Tab {
             self.handle_scrollwheel_up(&event.position, 3, client_id)
         } else if event.wheel_down {
             self.handle_scrollwheel_down(&event.position, 3, client_id)
+        } else if event.right && event.alt {
+            self.mouse_hover_pane_id.remove(&client_id);
+            Ok(MouseEffect::ungroup())
         } else if event.right {
             self.handle_right_click(&event, client_id)
         } else if event.middle {
@@ -3559,10 +4223,10 @@ impl Tab {
                 // start selection for copy/paste
                 let mut leave_clipboard_message = false;
                 pane_at_position.start_selection(&relative_position, client_id);
-                if pane_at_position.get_selected_text().is_some() {
+                if pane_at_position.get_selected_text(client_id).is_some() {
                     leave_clipboard_message = true;
                 }
-                if let PaneId::Terminal(_) = pane_at_position.pid() {
+                if pane_at_position.supports_mouse_selection() {
                     self.selecting_with_mouse_in_pane = Some(pane_at_position.pid());
                 }
                 if leave_clipboard_message {
@@ -3580,10 +4244,9 @@ impl Tab {
         let err_context =
             || format!("failed to handle mouse event {event:?} for client {client_id}");
         if !self.floating_panes.panes_are_visible() {
-            let search_selectable = false;
             if let Ok(Some(pane_id)) = self
                 .floating_panes
-                .get_pinned_pane_id_at(&event.position, search_selectable)
+                .get_pinned_pane_id_at(&event.position, true)
             {
                 // here, the floating panes are not visible, but there is a pinned pane (always
                 // visible) that has been clicked on - so we make the entire surface visible and
@@ -3591,6 +4254,15 @@ impl Tab {
                 self.show_floating_panes();
                 self.floating_panes.focus_pane(pane_id, client_id);
                 return Ok(MouseEffect::state_changed());
+            } else if let Ok(Some(_pane_id)) = self
+                .floating_panes
+                .get_pinned_pane_id_at(&event.position, false)
+            {
+                // here, the floating panes are not visible, but there is a pinned pane (always
+                // visible) that has been clicked on - this pane however is not selectable
+                // (we know this because we passed "false" to get_pinned_pane_id_at)
+                // so we don't do anything
+                return Ok(MouseEffect::default());
             }
         }
         let active_pane_id_before_click = self
@@ -3705,9 +4377,9 @@ impl Tab {
             } else {
                 let relative_position = pane_with_selection.relative_position(&event.position);
                 pane_with_selection.end_selection(&relative_position, client_id);
-                if let PaneId::Terminal(_) = pane_with_selection.pid() {
+                if pane_with_selection.supports_mouse_selection() {
                     if copy_on_release {
-                        let selected_text = pane_with_selection.get_selected_text();
+                        let selected_text = pane_with_selection.get_selected_text(client_id);
 
                         if let Some(selected_text) = selected_text {
                             leave_clipboard_message = true;
@@ -3724,7 +4396,17 @@ impl Tab {
             self.floating_panes
                 .stop_moving_pane_with_mouse(event.position);
         } else {
-            self.write_mouse_event_to_active_pane(event, client_id)?;
+            let active_pane_id = self
+                .get_active_pane_id(client_id)
+                .ok_or(anyhow!("Failed to find pane at position"))?;
+            let pane_id_at_position = self
+                .get_pane_at(&event.position, false)
+                .with_context(err_context)?
+                .ok_or_else(|| anyhow!("Failed to find pane at position"))?
+                .pid();
+            if active_pane_id == pane_id_at_position {
+                self.write_mouse_event_to_active_pane(event, client_id)?;
+            }
         }
         if leave_clipboard_message {
             Ok(MouseEffect::leave_clipboard_message())
@@ -3837,6 +4519,17 @@ impl Tab {
                         )
                         .with_context(err_context)?;
                     }
+                }
+                self.mouse_hover_pane_id.remove(&client_id);
+            } else {
+                let pane_id = pane.pid();
+                // if the pane is not selectable, we don't want to create a hover effect over it
+                // we do however want to remove the hover effect from other panes
+                let pane_is_selectable = pane.selectable();
+                if self.advanced_mouse_actions && pane_is_selectable {
+                    self.mouse_hover_pane_id.insert(client_id, pane_id);
+                } else if self.advanced_mouse_actions {
+                    self.mouse_hover_pane_id.remove(&client_id);
                 }
             }
         };
@@ -3963,7 +4656,7 @@ impl Tab {
     pub fn copy_selection(&self, client_id: ClientId) -> Result<()> {
         let selected_text = self
             .get_active_pane(client_id)
-            .and_then(|p| p.get_selected_text());
+            .and_then(|p| p.get_selected_text(client_id));
         if let Some(selected_text) = selected_text {
             self.write_selection_to_clipboard(&selected_text)
                 .with_context(|| {
@@ -4024,7 +4717,7 @@ impl Tab {
 
         Ok(())
     }
-    pub fn visible(&self, visible: bool) -> Result<()> {
+    pub fn visible(&mut self, visible: bool) -> Result<()> {
         let pids_in_this_tab = self.tiled_panes.pane_ids().filter_map(|p| match p {
             PaneId::Plugin(pid) => Some(pid),
             _ => None,
@@ -4036,27 +4729,28 @@ impl Tab {
         self.senders
             .send_to_plugin(PluginInstruction::Update(plugin_updates))
             .with_context(|| format!("failed to set visibility of tab to {visible}"))?;
+        if !visible {
+            self.mouse_hover_pane_id.clear();
+        }
         Ok(())
     }
 
     pub fn update_active_pane_name(&mut self, buf: Vec<u8>, client_id: ClientId) -> Result<()> {
         let err_context =
             || format!("failed to update name of active pane to '{buf:?}' for client {client_id}");
-
-        // Only allow printable unicode, delete and backspace keys.
-        let is_updatable = buf
-            .iter()
-            .all(|u| matches!(u, 0x20..=0x7E | 0xA0..=0xFF | 0x08 | 0x7F));
-        if is_updatable {
-            let s = str::from_utf8(&buf).with_context(err_context)?;
-            self.get_active_pane_mut(client_id)
-                .with_context(|| format!("no active pane found for client {client_id}"))
-                .map(|active_pane| {
-                    active_pane.update_name(s);
-                })?;
-        } else {
-            log::error!("Failed to update pane name due to unprintable characters");
-        }
+        let s = str::from_utf8(&buf).with_context(err_context)?;
+        self.get_active_pane_mut(client_id)
+            .with_context(|| format!("no active pane found for client {client_id}"))
+            .map(|active_pane| {
+                let to_update = match s {
+                    "\u{007F}" | "\u{0008}" => {
+                        // delete and backspace keys
+                        s
+                    },
+                    _ => &clean_string_from_control_and_linebreak(s),
+                };
+                active_pane.update_name(&to_update);
+            })?;
         Ok(())
     }
 
@@ -4128,6 +4822,9 @@ impl Tab {
     pub fn update_search_term(&mut self, buf: Vec<u8>, client_id: ClientId) -> Result<()> {
         if let Some(active_pane) = self.get_active_pane_or_floating_pane_mut(client_id) {
             // It only allows terminating char(\0), printable unicode, delete and backspace keys.
+            // TODO: we should really remove this limitation to allow searching for emojis and
+            // other wide chars - currently the search mechanism itself ignores wide chars, so we
+            // should first fix that before removing this condition
             let is_updatable = buf
                 .iter()
                 .all(|u| matches!(u, 0x00 | 0x20..=0x7E | 0x08 | 0x7F));
@@ -4200,7 +4897,12 @@ impl Tab {
             pane.add_red_pane_frame_color_override(error_text);
         }
     }
-    pub fn clear_pane_frame_color_override(&mut self, pane_id: PaneId) {
+    pub fn add_highlight_pane_frame_color_override(
+        &mut self,
+        pane_id: PaneId,
+        error_text: Option<String>,
+        client_id: Option<ClientId>,
+    ) {
         if let Some(pane) = self
             .tiled_panes
             .get_pane_mut(pane_id)
@@ -4212,7 +4914,26 @@ impl Tab {
                     .map(|s_p| &mut s_p.1)
             })
         {
-            pane.clear_pane_frame_color_override();
+            pane.add_highlight_pane_frame_color_override(error_text, client_id);
+        }
+    }
+    pub fn clear_pane_frame_color_override(
+        &mut self,
+        pane_id: PaneId,
+        client_id: Option<ClientId>,
+    ) {
+        if let Some(pane) = self
+            .tiled_panes
+            .get_pane_mut(pane_id)
+            .or_else(|| self.floating_panes.get_pane_mut(pane_id))
+            .or_else(|| {
+                self.suppressed_panes
+                    .values_mut()
+                    .find(|s_p| s_p.1.pid() == pane_id)
+                    .map(|s_p| &mut s_p.1)
+            })
+        {
+            pane.clear_pane_frame_color_override(client_id);
         }
     }
     pub fn update_plugin_loading_stage(&mut self, pid: u32, loading_indication: LoadingIndication) {
@@ -4351,12 +5072,14 @@ impl Tab {
     }
     pub fn pane_infos(&self) -> Vec<PaneInfo> {
         let mut pane_info = vec![];
-        let mut tiled_pane_info = self.tiled_panes.pane_info();
-        let mut floating_pane_info = self.floating_panes.pane_info();
+        let current_pane_group = { self.current_pane_group.borrow().clone_inner() };
+        let mut tiled_pane_info = self.tiled_panes.pane_info(&current_pane_group);
+        let mut floating_pane_info = self.floating_panes.pane_info(&current_pane_group);
         pane_info.append(&mut tiled_pane_info);
         pane_info.append(&mut floating_pane_info);
         for (pane_id, (_is_scrollback_editor, pane)) in self.suppressed_panes.iter() {
-            let mut pane_info_for_suppressed_pane = pane_info_for_pane(pane_id, pane);
+            let mut pane_info_for_suppressed_pane =
+                pane_info_for_pane(pane_id, pane, &current_pane_group);
             pane_info_for_suppressed_pane.is_floating = false;
             pane_info_for_suppressed_pane.is_suppressed = true;
             pane_info_for_suppressed_pane.is_focused = false;
@@ -4385,6 +5108,7 @@ impl Tab {
             pane.set_active_at(Instant::now());
             pane.set_geom(new_pane_geom);
             pane.set_content_offset(Offset::frame(1)); // floating panes always have a frame
+            pane.render_full_viewport(); // to make sure the frame is re-rendered
             resize_pty!(pane, self.os_api, self.senders, self.character_cell_size)
                 .with_context(err_context)?;
             self.floating_panes.add_pane(pane_id, pane);
@@ -4397,7 +5121,7 @@ impl Tab {
             // confusing and not what the user intends
             self.swap_layouts.set_is_floating_damaged(); // we do this so that we won't skip to the
                                                          // next layout
-            self.next_swap_layout()?;
+            self.relayout_floating_panes(false)?;
         }
         Ok(())
     }
@@ -4431,8 +5155,40 @@ impl Tab {
             // confusing and not what the user intends
             self.swap_layouts.set_is_tiled_damaged(); // we do this so that we won't skip to the
                                                       // next layout
-            self.next_swap_layout()?;
+            self.relayout_tiled_panes(false)?;
         }
+        Ok(())
+    }
+    pub fn add_stacked_pane_to_pane_id(
+        &mut self,
+        pane: Box<dyn Pane>,
+        pane_id: PaneId,
+        root_pane_id: PaneId,
+    ) -> Result<()> {
+        if self.tiled_panes.fullscreen_is_active() {
+            self.tiled_panes.unset_fullscreen();
+        }
+        self.tiled_panes
+            .add_pane_to_stack_of_pane_id(pane_id, pane, root_pane_id);
+        self.set_should_clear_display_before_rendering();
+        self.tiled_panes.expand_pane_in_stack(pane_id); // so that it will get focused by all
+                                                        // clients
+        self.swap_layouts.set_is_tiled_damaged();
+        Ok(())
+    }
+    pub fn add_stacked_pane_to_active_pane(
+        &mut self,
+        pane: Box<dyn Pane>,
+        pane_id: PaneId,
+        client_id: ClientId,
+    ) -> Result<()> {
+        if self.tiled_panes.fullscreen_is_active() {
+            self.tiled_panes.unset_fullscreen();
+        }
+        self.tiled_panes
+            .add_pane_to_stack_of_active_pane(pane_id, pane, client_id);
+        self.tiled_panes.focus_pane(pane_id, client_id);
+        self.swap_layouts.set_is_tiled_damaged();
         Ok(())
     }
     pub fn request_plugin_permissions(&mut self, pid: u32, permissions: Option<PluginPermission>) {
@@ -4467,7 +5223,11 @@ impl Tab {
             self.focus_suppressed_pane_for_all_clients(PaneId::Plugin(pid));
         }
     }
-    pub fn rerun_terminal_pane_with_id(&mut self, terminal_pane_id: u32) {
+    pub fn rerun_terminal_pane_with_id(
+        &mut self,
+        terminal_pane_id: u32,
+        completion_tx: Option<NotificationEnd>,
+    ) {
         let pane_id = PaneId::Terminal(terminal_pane_id);
         match self
             .floating_panes
@@ -4481,6 +5241,7 @@ impl Tab {
                     let _ = self.senders.send_to_pty(PtyInstruction::ReRunCommandInPane(
                         pane_id,
                         command_to_rerun,
+                        completion_tx,
                     ));
                 } else {
                     log::error!("Pane is still running!")
@@ -4589,6 +5350,16 @@ impl Tab {
     pub fn update_auto_layout(&mut self, auto_layout: bool) {
         self.auto_layout = auto_layout;
     }
+    pub fn update_advanced_mouse_actions(&mut self, advanced_mouse_actions: bool) {
+        self.advanced_mouse_actions = advanced_mouse_actions;
+    }
+    pub fn update_web_sharing(&mut self, web_sharing: WebSharing) {
+        let old_value = self.web_sharing;
+        self.web_sharing = web_sharing;
+        if old_value != self.web_sharing {
+            let _ = self.update_input_modes();
+        }
+    }
     pub fn extract_suppressed_panes(&mut self) -> SuppressedPanes {
         self.suppressed_panes.drain().collect()
     }
@@ -4609,16 +5380,24 @@ impl Tab {
             self.set_force_render();
         }
     }
-    pub fn has_room_for_stack(&self, root_pane_id: PaneId, stack_size: usize) -> bool {
+    pub fn has_room_for_stack(&mut self, root_pane_id: PaneId, stack_size: usize) -> bool {
         if self.floating_panes.panes_contain(&root_pane_id)
             || self.suppressed_panes.contains_key(&root_pane_id)
         {
             log::error!("Root pane of stack cannot be floating or suppressed");
             return false;
         }
-        self.get_pane_with_id(root_pane_id)
-            .map(|p| p.position_and_size().rows.as_usize() >= stack_size + MIN_TERMINAL_HEIGHT)
-            .unwrap_or(false)
+        if self.pane_is_stacked(root_pane_id) {
+            let room_left_in_stack = self
+                .tiled_panes
+                .room_left_in_stack_of_pane_id(&root_pane_id)
+                .unwrap_or(0);
+            stack_size <= room_left_in_stack
+        } else {
+            self.get_pane_with_id(root_pane_id)
+                .map(|p| p.position_and_size().rows.as_usize() >= stack_size + MIN_TERMINAL_HEIGHT)
+                .unwrap_or(false)
+        }
     }
     pub fn set_tiled_panes_damaged(&mut self) {
         self.swap_layouts.set_is_tiled_damaged();
@@ -4629,33 +5408,38 @@ impl Tab {
             return;
         }
         self.swap_layouts.set_is_tiled_damaged(); // TODO: verify we can do all the below first
-
-        // + 1 for the root pane
-        let mut stack_geoms = self
-            .tiled_panes
-            .stack_panes(root_pane_id, panes_to_stack.len() + 1);
-        if stack_geoms.is_empty() {
-            log::error!("Failed to find room for stacked panes");
-            return;
-        }
-        self.tiled_panes
-            .set_geom_for_pane_with_id(&root_pane_id, stack_geoms.remove(0));
-        let mut focused_pane_id_in_stack = None;
-        for mut pane in panes_to_stack.drain(..) {
-            let pane_id = pane.pid();
-            let stack_geom = stack_geoms.remove(0);
-            pane.set_geom(stack_geom);
-            self.tiled_panes.add_pane_with_existing_geom(pane_id, pane);
-            if self.tiled_panes.pane_id_is_focused(&pane_id) {
-                focused_pane_id_in_stack = Some(pane_id);
+        if self.pane_is_stacked(root_pane_id) {
+            for pane in panes_to_stack.drain(..) {
+                self.tiled_panes.add_pane_to_stack(&root_pane_id, pane);
             }
-        }
-        // if we had a focused pane in the stack, we expand it
-        if let Some(focused_pane_id_in_stack) = focused_pane_id_in_stack {
+        } else {
+            // + 1 for the root pane
+            let mut stack_geoms = self
+                .tiled_panes
+                .stack_panes(root_pane_id, panes_to_stack.len() + 1);
+            if stack_geoms.is_empty() {
+                log::error!("Failed to find room for stacked panes");
+                return;
+            }
             self.tiled_panes
-                .expand_pane_in_stack(focused_pane_id_in_stack);
-        } else if self.tiled_panes.pane_id_is_focused(&root_pane_id) {
-            self.tiled_panes.expand_pane_in_stack(root_pane_id);
+                .set_geom_for_pane_with_id(&root_pane_id, stack_geoms.remove(0));
+            let mut focused_pane_id_in_stack = None;
+            for mut pane in panes_to_stack.drain(..) {
+                let pane_id = pane.pid();
+                let stack_geom = stack_geoms.remove(0);
+                pane.set_geom(stack_geom);
+                self.tiled_panes.add_pane_with_existing_geom(pane_id, pane);
+                if self.tiled_panes.pane_id_is_focused(&pane_id) {
+                    focused_pane_id_in_stack = Some(pane_id);
+                }
+            }
+            // if we had a focused pane in the stack, we expand it
+            if let Some(focused_pane_id_in_stack) = focused_pane_id_in_stack {
+                self.tiled_panes
+                    .expand_pane_in_stack(focused_pane_id_in_stack);
+            } else if self.tiled_panes.pane_id_is_focused(&root_pane_id) {
+                self.tiled_panes.expand_pane_in_stack(root_pane_id);
+            }
         }
     }
     pub fn change_floating_pane_coordinates(
@@ -4687,6 +5471,9 @@ impl Tab {
     pub fn get_display_area(&self) -> Size {
         self.display_area.borrow().clone()
     }
+    pub fn get_client_input_mode(&self, client_id: ClientId) -> Option<InputMode> {
+        self.mode_info.borrow().get(&client_id).map(|m| m.mode)
+    }
     fn new_scrollback_editor_pane(&self, pid: u32) -> TerminalPane {
         let next_terminal_position = self.get_next_terminal_position();
         let mut new_pane = TerminalPane::new(
@@ -4706,6 +5493,7 @@ impl Tab {
             self.arrow_fonts,
             self.styled_underlines,
             self.explicitly_disable_kitty_keyboard_protocol,
+            None,
         );
         new_pane.update_name("EDITING SCROLLBACK"); // we do this here and not in the
                                                     // constructor so it won't be overrided
@@ -4723,9 +5511,18 @@ impl Tab {
             (is_scrollback_editor, replaced_pane),
         );
     }
+    fn pane_is_stacked(&self, pane_id: PaneId) -> bool {
+        self.get_pane_with_id(pane_id)
+            .map(|p| p.position_and_size().stacked.is_some())
+            .unwrap_or(false)
+    }
 }
 
-pub fn pane_info_for_pane(pane_id: &PaneId, pane: &Box<dyn Pane>) -> PaneInfo {
+pub fn pane_info_for_pane(
+    pane_id: &PaneId,
+    pane: &Box<dyn Pane>,
+    current_pane_group: &HashMap<ClientId, Vec<PaneId>>,
+) -> PaneInfo {
     let mut pane_info = PaneInfo::default();
     pane_info.pane_x = pane.x();
     pane_info.pane_content_x = pane.get_content_x();
@@ -4741,6 +5538,17 @@ pub fn pane_info_for_pane(pane_id: &PaneId, pane: &Box<dyn Pane>) -> PaneInfo {
     pane_info.exited = pane.exited();
     pane_info.exit_status = pane.exit_status();
     pane_info.is_held = pane.is_held();
+    let index_in_pane_group: BTreeMap<ClientId, usize> = current_pane_group
+        .iter()
+        .filter_map(|(client_id, pane_ids)| {
+            if let Some(position) = pane_ids.iter().position(|p_id| p_id == &pane.pid()) {
+                Some((*client_id, position))
+            } else {
+                None
+            }
+        })
+        .collect();
+    pane_info.index_in_pane_group = index_in_pane_group;
 
     match pane_id {
         PaneId::Terminal(terminal_id) => {

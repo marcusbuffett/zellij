@@ -1,16 +1,21 @@
 pub use super::generated_api::api::{
     action::{Action as ProtobufAction, Position as ProtobufPosition},
     event::{
-        event::Payload as ProtobufEventPayload, ClientInfo as ProtobufClientInfo,
-        ClientTabHistory as ProtobufClientTabHistory, CopyDestination as ProtobufCopyDestination,
-        Event as ProtobufEvent, EventNameList as ProtobufEventNameList,
-        EventType as ProtobufEventType, FileMetadata as ProtobufFileMetadata,
-        InputModeKeybinds as ProtobufInputModeKeybinds, KeyBind as ProtobufKeyBind,
-        LayoutInfo as ProtobufLayoutInfo, ModeUpdatePayload as ProtobufModeUpdatePayload,
-        PaneId as ProtobufPaneId, PaneInfo as ProtobufPaneInfo,
-        PaneManifest as ProtobufPaneManifest, PaneType as ProtobufPaneType,
+        event::Payload as ProtobufEventPayload, pane_scrollback_response,
+        ClientInfo as ProtobufClientInfo, ClientTabHistory as ProtobufClientTabHistory,
+        CopyDestination as ProtobufCopyDestination, Event as ProtobufEvent,
+        EventNameList as ProtobufEventNameList, EventType as ProtobufEventType,
+        FileMetadata as ProtobufFileMetadata, InputModeKeybinds as ProtobufInputModeKeybinds,
+        KeyBind as ProtobufKeyBind, LayoutInfo as ProtobufLayoutInfo,
+        ModeUpdatePayload as ProtobufModeUpdatePayload, PaneContents as ProtobufPaneContents,
+        PaneContentsEntry as ProtobufPaneContentsEntry, PaneId as ProtobufPaneId,
+        PaneInfo as ProtobufPaneInfo, PaneManifest as ProtobufPaneManifest,
+        PaneRenderReportPayload as ProtobufPaneRenderReportPayload,
+        PaneScrollbackResponse as ProtobufPaneScrollbackResponse, PaneType as ProtobufPaneType,
         PluginInfo as ProtobufPluginInfo, ResurrectableSession as ProtobufResurrectableSession,
-        SessionManifest as ProtobufSessionManifest, TabInfo as ProtobufTabInfo, *,
+        SelectedText as ProtobufSelectedText, SessionManifest as ProtobufSessionManifest,
+        TabInfo as ProtobufTabInfo, WebServerStatusPayload as ProtobufWebServerStatusPayload,
+        WebSharing as ProtobufWebSharing, *,
     },
     input_mode::InputMode as ProtobufInputMode,
     key::Key as ProtobufKey,
@@ -19,8 +24,9 @@ pub use super::generated_api::api::{
 #[allow(hidden_glob_reexports)]
 use crate::data::{
     ClientInfo, CopyDestination, Event, EventType, FileMetadata, InputMode, KeyWithModifier,
-    LayoutInfo, ModeInfo, Mouse, PaneId, PaneInfo, PaneManifest, PermissionStatus,
-    PluginCapabilities, PluginInfo, SessionInfo, Style, TabInfo,
+    LayoutInfo, ModeInfo, Mouse, PaneContents, PaneId, PaneInfo, PaneManifest,
+    PaneScrollbackResponse, PermissionStatus, PluginCapabilities, PluginInfo, SelectedText,
+    SessionInfo, Style, TabInfo, WebServerStatus, WebSharing,
 };
 
 use crate::errors::prelude::*;
@@ -28,7 +34,9 @@ use crate::input::actions::Action;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::TryFrom;
+use std::net::IpAddr;
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::time::Duration;
 
 impl TryFrom<ProtobufEvent> for Event {
@@ -358,6 +366,36 @@ impl TryFrom<ProtobufEvent> for Event {
             Some(ProtobufEventType::ConfigWasWrittenToDisk) => match protobuf_event.payload {
                 None => Ok(Event::ConfigWasWrittenToDisk),
                 _ => Err("Malformed payload for the ConfigWasWrittenToDisk Event"),
+            },
+            Some(ProtobufEventType::WebServerStatus) => match protobuf_event.payload {
+                Some(ProtobufEventPayload::WebServerStatusPayload(web_server_status)) => {
+                    Ok(Event::WebServerStatus(web_server_status.try_into()?))
+                },
+                _ => Err("Malformed payload for the WebServerStatus Event"),
+            },
+            Some(ProtobufEventType::BeforeClose) => match protobuf_event.payload {
+                None => Ok(Event::BeforeClose),
+                _ => Err("Malformed payload for the BeforeClose Event"),
+            },
+            Some(ProtobufEventType::FailedToStartWebServer) => match protobuf_event.payload {
+                Some(ProtobufEventPayload::FailedToStartWebServerPayload(
+                    failed_to_start_web_server_payload,
+                )) => Ok(Event::FailedToStartWebServer(
+                    failed_to_start_web_server_payload.error,
+                )),
+                _ => Err("Malformed payload for the FailedToStartWebServer Event"),
+            },
+            Some(ProtobufEventType::InterceptedKeyPress) => match protobuf_event.payload {
+                Some(ProtobufEventPayload::KeyPayload(protobuf_key)) => {
+                    Ok(Event::InterceptedKeyPress(protobuf_key.try_into()?))
+                },
+                _ => Err("Malformed payload for the InterceptedKeyPress Event"),
+            },
+            Some(ProtobufEventType::PaneRenderReport) => match protobuf_event.payload {
+                Some(ProtobufEventPayload::PaneRenderReportPayload(protobuf_payload)) => {
+                    Ok(Event::PaneRenderReport(protobuf_payload.try_into()?))
+                },
+                _ => Err("Malformed payload for the PaneRenderReport Event"),
             },
             None => Err("Unknown Protobuf Event"),
         }
@@ -733,6 +771,32 @@ impl TryFrom<Event> for ProtobufEvent {
                 name: ProtobufEventType::ConfigWasWrittenToDisk as i32,
                 payload: None,
             }),
+            Event::WebServerStatus(web_server_status) => Ok(ProtobufEvent {
+                name: ProtobufEventType::WebServerStatus as i32,
+                payload: Some(event::Payload::WebServerStatusPayload(
+                    ProtobufWebServerStatusPayload::try_from(web_server_status)?,
+                )),
+            }),
+            Event::BeforeClose => Ok(ProtobufEvent {
+                name: ProtobufEventType::BeforeClose as i32,
+                payload: None,
+            }),
+            Event::FailedToStartWebServer(error) => Ok(ProtobufEvent {
+                name: ProtobufEventType::FailedToStartWebServer as i32,
+                payload: Some(event::Payload::FailedToStartWebServerPayload(
+                    FailedToStartWebServerPayload { error },
+                )),
+            }),
+            Event::InterceptedKeyPress(key) => Ok(ProtobufEvent {
+                name: ProtobufEventType::InterceptedKeyPress as i32,
+                payload: Some(event::Payload::KeyPayload(key.try_into()?)),
+            }),
+            Event::PaneRenderReport(pane_contents_map) => Ok(ProtobufEvent {
+                name: ProtobufEventType::PaneRenderReport as i32,
+                payload: Some(event::Payload::PaneRenderReportPayload(
+                    pane_contents_map.try_into()?,
+                )),
+            }),
         }
     }
 }
@@ -771,6 +835,8 @@ impl TryFrom<SessionInfo> for ProtobufSessionManifest {
                 .into_iter()
                 .map(|p| ProtobufPluginInfo::from(p))
                 .collect(),
+            web_clients_allowed: session_info.web_clients_allowed,
+            web_client_count: session_info.web_client_count as u32,
             tab_history: session_info
                 .tab_history
                 .into_iter()
@@ -860,6 +926,8 @@ impl TryFrom<ProtobufSessionManifest> for SessionInfo {
                 .filter_map(|l| LayoutInfo::try_from(l).ok())
                 .collect(),
             plugins,
+            web_clients_allowed: protobuf_session_manifest.web_clients_allowed,
+            web_client_count: protobuf_session_manifest.web_client_count as usize,
             tab_history,
         })
     }
@@ -1072,6 +1140,16 @@ impl TryFrom<ProtobufPaneInfo> for PaneInfo {
             terminal_command: protobuf_pane_info.terminal_command,
             plugin_url: protobuf_pane_info.plugin_url,
             is_selectable: protobuf_pane_info.is_selectable,
+            index_in_pane_group: protobuf_pane_info
+                .index_in_pane_group
+                .iter()
+                .map(|index_in_pane_group| {
+                    (
+                        index_in_pane_group.client_id as u16,
+                        index_in_pane_group.index as usize,
+                    )
+                })
+                .collect(),
         })
     }
 }
@@ -1107,6 +1185,14 @@ impl TryFrom<PaneInfo> for ProtobufPaneInfo {
             terminal_command: pane_info.terminal_command,
             plugin_url: pane_info.plugin_url,
             is_selectable: pane_info.is_selectable,
+            index_in_pane_group: pane_info
+                .index_in_pane_group
+                .iter()
+                .map(|(&client_id, &index)| IndexInPaneGroup {
+                    client_id: client_id as u32,
+                    index: index as u32,
+                })
+                .collect(),
         })
     }
 }
@@ -1213,9 +1299,29 @@ impl TryFrom<ProtobufModeUpdatePayload> for ModeInfo {
             .editor
             .map(|e| PathBuf::from(e));
         let shell = protobuf_mode_update_payload.shell.map(|s| PathBuf::from(s));
+        let web_clients_allowed = protobuf_mode_update_payload.web_clients_allowed;
+        let web_sharing = protobuf_mode_update_payload
+            .web_sharing
+            .and_then(|w| ProtobufWebSharing::from_i32(w))
+            .map(|w| w.into());
         let capabilities = PluginCapabilities {
             arrow_fonts: protobuf_mode_update_payload.arrow_fonts_support,
         };
+        let currently_marking_pane_group =
+            protobuf_mode_update_payload.currently_marking_pane_group;
+        let is_web_client = protobuf_mode_update_payload.is_web_client;
+
+        let web_server_ip = protobuf_mode_update_payload
+            .web_server_ip
+            .as_ref()
+            .and_then(|web_server_ip| IpAddr::from_str(web_server_ip).ok());
+
+        let web_server_port = protobuf_mode_update_payload
+            .web_server_port
+            .map(|w| w as u16);
+
+        let web_server_capability = protobuf_mode_update_payload.web_server_capability;
+
         let mode_info = ModeInfo {
             mode: current_mode,
             keybinds,
@@ -1225,6 +1331,13 @@ impl TryFrom<ProtobufModeUpdatePayload> for ModeInfo {
             base_mode,
             editor,
             shell,
+            web_clients_allowed,
+            web_sharing,
+            currently_marking_pane_group,
+            is_web_client,
+            web_server_ip,
+            web_server_port,
+            web_server_capability,
         };
         Ok(mode_info)
     }
@@ -1242,6 +1355,13 @@ impl TryFrom<ModeInfo> for ProtobufModeUpdatePayload {
         let session_name = mode_info.session_name;
         let editor = mode_info.editor.map(|e| e.display().to_string());
         let shell = mode_info.shell.map(|s| s.display().to_string());
+        let web_clients_allowed = mode_info.web_clients_allowed;
+        let web_sharing = mode_info.web_sharing.map(|w| w as i32);
+        let currently_marking_pane_group = mode_info.currently_marking_pane_group;
+        let is_web_client = mode_info.is_web_client;
+        let web_server_ip = mode_info.web_server_ip.map(|i| format!("{}", i));
+        let web_server_port = mode_info.web_server_port.map(|p| p as u32);
+        let web_server_capability = mode_info.web_server_capability;
         let mut protobuf_input_mode_keybinds: Vec<ProtobufInputModeKeybinds> = vec![];
         for (input_mode, input_mode_keybinds) in mode_info.keybinds {
             let mode: ProtobufInputMode = input_mode.try_into()?;
@@ -1275,6 +1395,13 @@ impl TryFrom<ModeInfo> for ProtobufModeUpdatePayload {
             base_mode: base_mode.map(|b_m| b_m as i32),
             editor,
             shell,
+            web_clients_allowed,
+            web_sharing,
+            currently_marking_pane_group,
+            is_web_client,
+            web_server_ip,
+            web_server_port,
+            web_server_capability,
         })
     }
 }
@@ -1344,6 +1471,11 @@ impl TryFrom<ProtobufEventType> for EventType {
             ProtobufEventType::FailedToChangeHostFolder => EventType::FailedToChangeHostFolder,
             ProtobufEventType::PastedText => EventType::PastedText,
             ProtobufEventType::ConfigWasWrittenToDisk => EventType::ConfigWasWrittenToDisk,
+            ProtobufEventType::WebServerStatus => EventType::WebServerStatus,
+            ProtobufEventType::BeforeClose => EventType::BeforeClose,
+            ProtobufEventType::FailedToStartWebServer => EventType::FailedToStartWebServer,
+            ProtobufEventType::InterceptedKeyPress => EventType::InterceptedKeyPress,
+            ProtobufEventType::PaneRenderReport => EventType::PaneRenderReport,
         })
     }
 }
@@ -1383,6 +1515,11 @@ impl TryFrom<EventType> for ProtobufEventType {
             EventType::FailedToChangeHostFolder => ProtobufEventType::FailedToChangeHostFolder,
             EventType::PastedText => ProtobufEventType::PastedText,
             EventType::ConfigWasWrittenToDisk => ProtobufEventType::ConfigWasWrittenToDisk,
+            EventType::WebServerStatus => ProtobufEventType::WebServerStatus,
+            EventType::BeforeClose => ProtobufEventType::BeforeClose,
+            EventType::FailedToStartWebServer => ProtobufEventType::FailedToStartWebServer,
+            EventType::InterceptedKeyPress => ProtobufEventType::InterceptedKeyPress,
+            EventType::PaneRenderReport => ProtobufEventType::PaneRenderReport,
         })
     }
 }
@@ -1464,14 +1601,18 @@ fn serialize_mode_update_event_with_non_default_values() {
                 InputMode::Locked,
                 vec![(
                     KeyWithModifier::new(BareKey::Char('b')).with_alt_modifier(),
-                    vec![Action::SwitchToMode(InputMode::Normal)],
+                    vec![Action::SwitchToMode {
+                        input_mode: InputMode::Normal,
+                    }],
                 )],
             ),
             (
                 InputMode::Tab,
                 vec![(
                     KeyWithModifier::new(BareKey::Up).with_alt_modifier(),
-                    vec![Action::SwitchToMode(InputMode::Pane)],
+                    vec![Action::SwitchToMode {
+                        input_mode: InputMode::Pane,
+                    }],
                 )],
             ),
             (
@@ -1480,13 +1621,21 @@ fn serialize_mode_update_event_with_non_default_values() {
                     (
                         KeyWithModifier::new(BareKey::Char('b')).with_ctrl_modifier(),
                         vec![
-                            Action::SwitchToMode(InputMode::Tmux),
-                            Action::Write(None, vec![10], false),
+                            Action::SwitchToMode {
+                                input_mode: InputMode::Tmux,
+                            },
+                            Action::Write {
+                                key_with_modifier: None,
+                                bytes: vec![10],
+                                is_kitty_keyboard_protocol: false,
+                            },
                         ],
                     ),
                     (
                         KeyWithModifier::new(BareKey::Char('a')),
-                        vec![Action::WriteChars("foo".to_owned())],
+                        vec![Action::WriteChars {
+                            chars: "foo".to_owned(),
+                        }],
                     ),
                 ],
             ),
@@ -1523,6 +1672,13 @@ fn serialize_mode_update_event_with_non_default_values() {
         base_mode: Some(InputMode::Locked),
         editor: Some(PathBuf::from("my_awesome_editor")),
         shell: Some(PathBuf::from("my_awesome_shell")),
+        web_clients_allowed: Some(true),
+        web_sharing: Some(WebSharing::default()),
+        currently_marking_pane_group: Some(false),
+        is_web_client: Some(false),
+        web_server_ip: IpAddr::from_str("127.0.0.1").ok(),
+        web_server_port: Some(8082),
+        web_server_capability: Some(true),
     });
     let protobuf_event: ProtobufEvent = mode_update_event.clone().try_into().unwrap();
     let serialized_protobuf_event = protobuf_event.encode_to_vec();
@@ -1884,6 +2040,14 @@ fn serialize_session_update_event_with_non_default_values() {
         TabInfo::default(),
     ];
     let mut panes = HashMap::new();
+    let mut index_in_pane_group_1 = BTreeMap::new();
+    index_in_pane_group_1.insert(1, 0);
+    index_in_pane_group_1.insert(2, 0);
+    index_in_pane_group_1.insert(3, 0);
+    let mut index_in_pane_group_2 = BTreeMap::new();
+    index_in_pane_group_2.insert(1, 1);
+    index_in_pane_group_2.insert(2, 1);
+    index_in_pane_group_2.insert(3, 1);
     let panes_list = vec![
         PaneInfo {
             id: 1,
@@ -1908,6 +2072,7 @@ fn serialize_session_update_event_with_non_default_values() {
             terminal_command: Some("foo".to_owned()),
             plugin_url: None,
             is_selectable: true,
+            index_in_pane_group: index_in_pane_group_1,
         },
         PaneInfo {
             id: 1,
@@ -1932,6 +2097,7 @@ fn serialize_session_update_event_with_non_default_values() {
             terminal_command: None,
             plugin_url: Some("i_am_a_fake_plugin".to_owned()),
             is_selectable: true,
+            index_in_pane_group: index_in_pane_group_2,
         },
     ];
     panes.insert(0, panes_list);
@@ -1960,6 +2126,8 @@ fn serialize_session_update_event_with_non_default_values() {
             LayoutInfo::File("layout3".to_owned()),
         ],
         plugins,
+        web_clients_allowed: false,
+        web_client_count: 1,
         tab_history,
     };
     let session_info_2 = SessionInfo {
@@ -1976,6 +2144,8 @@ fn serialize_session_update_event_with_non_default_values() {
             LayoutInfo::File("layout3".to_owned()),
         ],
         plugins: Default::default(),
+        web_clients_allowed: false,
+        web_client_count: 0,
         tab_history: Default::default(),
     };
     let session_infos = vec![session_info_1, session_info_2];
@@ -2023,5 +2193,202 @@ impl TryFrom<PaneId> for ProtobufPaneId {
                 id,
             }),
         }
+    }
+}
+
+impl Into<ProtobufWebSharing> for WebSharing {
+    fn into(self) -> ProtobufWebSharing {
+        match self {
+            WebSharing::On => ProtobufWebSharing::On,
+            WebSharing::Off => ProtobufWebSharing::Off,
+            WebSharing::Disabled => ProtobufWebSharing::Disabled,
+        }
+    }
+}
+
+impl Into<WebSharing> for ProtobufWebSharing {
+    fn into(self) -> WebSharing {
+        match self {
+            ProtobufWebSharing::On => WebSharing::On,
+            ProtobufWebSharing::Off => WebSharing::Off,
+            ProtobufWebSharing::Disabled => WebSharing::Disabled,
+        }
+    }
+}
+
+impl TryFrom<WebServerStatus> for ProtobufWebServerStatusPayload {
+    type Error = &'static str;
+    fn try_from(web_server_status: WebServerStatus) -> Result<Self, &'static str> {
+        match web_server_status {
+            WebServerStatus::Online(url) => Ok(ProtobufWebServerStatusPayload {
+                web_server_status_indication: WebServerStatusIndication::Online as i32,
+                payload: Some(url),
+            }),
+            WebServerStatus::DifferentVersion(version) => Ok(ProtobufWebServerStatusPayload {
+                web_server_status_indication: WebServerStatusIndication::DifferentVersion as i32,
+                payload: Some(format!("{}", version)),
+            }),
+            WebServerStatus::Offline => Ok(ProtobufWebServerStatusPayload {
+                web_server_status_indication: WebServerStatusIndication::Offline as i32,
+                payload: None,
+            }),
+        }
+    }
+}
+
+impl TryFrom<ProtobufWebServerStatusPayload> for WebServerStatus {
+    type Error = &'static str;
+    fn try_from(
+        protobuf_web_server_status: ProtobufWebServerStatusPayload,
+    ) -> Result<Self, &'static str> {
+        match WebServerStatusIndication::from_i32(
+            protobuf_web_server_status.web_server_status_indication,
+        ) {
+            Some(WebServerStatusIndication::Online) => {
+                let payload = protobuf_web_server_status
+                    .payload
+                    .ok_or("payload_not_found")?;
+                Ok(WebServerStatus::Online(payload))
+            },
+            Some(WebServerStatusIndication::DifferentVersion) => {
+                let payload = protobuf_web_server_status
+                    .payload
+                    .ok_or("payload_not_found")?;
+                Ok(WebServerStatus::DifferentVersion(payload))
+            },
+            Some(WebServerStatusIndication::Offline) => Ok(WebServerStatus::Offline),
+            None => Err("Unknown status"),
+        }
+    }
+}
+
+impl TryFrom<ProtobufPaneRenderReportPayload> for HashMap<PaneId, PaneContents> {
+    type Error = &'static str;
+    fn try_from(protobuf_payload: ProtobufPaneRenderReportPayload) -> Result<Self, &'static str> {
+        let mut pane_contents_map = HashMap::new();
+
+        for entry in protobuf_payload.pane_contents {
+            let pane_id = entry
+                .pane_id
+                .ok_or("Missing pane_id in PaneContentsEntry")?
+                .try_into()?;
+            let pane_contents = entry
+                .pane_contents
+                .ok_or("Missing pane_contents in PaneContentsEntry")?
+                .try_into()?;
+            pane_contents_map.insert(pane_id, pane_contents);
+        }
+
+        Ok(pane_contents_map)
+    }
+}
+
+impl TryFrom<HashMap<PaneId, PaneContents>> for ProtobufPaneRenderReportPayload {
+    type Error = &'static str;
+    fn try_from(pane_contents_map: HashMap<PaneId, PaneContents>) -> Result<Self, &'static str> {
+        let mut pane_contents_vec = vec![];
+
+        for (pane_id, pane_contents) in pane_contents_map {
+            pane_contents_vec.push(ProtobufPaneContentsEntry {
+                pane_id: Some(pane_id.try_into()?),
+                pane_contents: Some(pane_contents.try_into()?),
+            });
+        }
+
+        Ok(ProtobufPaneRenderReportPayload {
+            pane_contents: pane_contents_vec,
+        })
+    }
+}
+
+impl TryFrom<ProtobufPaneContents> for PaneContents {
+    type Error = &'static str;
+    fn try_from(protobuf_contents: ProtobufPaneContents) -> Result<Self, &'static str> {
+        let selected_text = protobuf_contents
+            .selected_text
+            .map(|st| st.try_into())
+            .transpose()?;
+
+        Ok(PaneContents {
+            viewport: protobuf_contents.viewport,
+            selected_text,
+            lines_above_viewport: protobuf_contents.lines_above_viewport,
+            lines_below_viewport: protobuf_contents.lines_below_viewport,
+        })
+    }
+}
+
+impl TryFrom<PaneContents> for ProtobufPaneContents {
+    type Error = &'static str;
+    fn try_from(pane_contents: PaneContents) -> Result<Self, &'static str> {
+        let selected_text = pane_contents
+            .selected_text
+            .map(|st| st.try_into())
+            .transpose()?;
+
+        Ok(ProtobufPaneContents {
+            viewport: pane_contents.viewport,
+            selected_text,
+            lines_above_viewport: pane_contents.lines_above_viewport,
+            lines_below_viewport: pane_contents.lines_below_viewport,
+        })
+    }
+}
+
+impl TryFrom<ProtobufPaneScrollbackResponse> for PaneScrollbackResponse {
+    type Error = &'static str;
+    fn try_from(protobuf_response: ProtobufPaneScrollbackResponse) -> Result<Self, &'static str> {
+        match protobuf_response.response {
+            Some(pane_scrollback_response::Response::Ok(pane_contents)) => {
+                Ok(PaneScrollbackResponse::Ok(pane_contents.try_into()?))
+            },
+            Some(pane_scrollback_response::Response::Err(error_msg)) => {
+                Ok(PaneScrollbackResponse::Err(error_msg))
+            },
+            None => Err("PaneScrollbackResponse missing response field"),
+        }
+    }
+}
+
+impl TryFrom<PaneScrollbackResponse> for ProtobufPaneScrollbackResponse {
+    type Error = &'static str;
+    fn try_from(response: PaneScrollbackResponse) -> Result<Self, &'static str> {
+        let response_field = match response {
+            PaneScrollbackResponse::Ok(pane_contents) => {
+                pane_scrollback_response::Response::Ok(pane_contents.try_into()?)
+            },
+            PaneScrollbackResponse::Err(error_msg) => {
+                pane_scrollback_response::Response::Err(error_msg)
+            },
+        };
+        Ok(ProtobufPaneScrollbackResponse {
+            response: Some(response_field),
+        })
+    }
+}
+
+impl TryFrom<ProtobufSelectedText> for SelectedText {
+    type Error = &'static str;
+    fn try_from(protobuf_selected_text: ProtobufSelectedText) -> Result<Self, &'static str> {
+        Ok(SelectedText {
+            start: protobuf_selected_text
+                .start
+                .ok_or("Missing start in SelectedText")?
+                .try_into()?,
+            end: protobuf_selected_text
+                .end
+                .ok_or("Missing end in SelectedText")?
+                .try_into()?,
+        })
+    }
+}
+
+impl TryFrom<SelectedText> for ProtobufSelectedText {
+    type Error = &'static str;
+    fn try_from(selected_text: SelectedText) -> Result<Self, &'static str> {
+        Ok(ProtobufSelectedText {
+            start: Some(selected_text.start.try_into()?),
+            end: Some(selected_text.end.try_into()?),
+        })
     }
 }

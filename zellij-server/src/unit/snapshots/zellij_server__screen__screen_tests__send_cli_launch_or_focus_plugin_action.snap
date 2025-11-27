@@ -1,6 +1,5 @@
 ---
 source: zellij-server/src/./unit/screen_tests.rs
-assertion_line: 2983
 expression: "format!(\"{:#?}\", pty_fill_plugin_cwd_instruction)"
 ---
 Some(
@@ -32,5 +31,12 @@ Some(
         false,
         None,
         None,
+        None,
+        Some(
+            NotificationEnd {
+                channel: None,
+                exit_status: None,
+            },
+        ),
     ),
 )

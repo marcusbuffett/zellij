@@ -213,6 +213,7 @@ pub enum ScreenContext {
     HandlePtyBytes,
     PluginBytes,
     Render,
+    RenderToClients,
     NewPane,
     OpenInPlaceEditor,
     ToggleFloatingPanes,
@@ -259,6 +260,7 @@ pub enum ScreenContext {
     DumpScreen,
     DumpLayout,
     EditScrollback,
+    GetPaneScrollback,
     ScrollUp,
     ScrollUpAt,
     ScrollDown,
@@ -347,7 +349,7 @@ pub enum ScreenContext {
     UpdateSessionInfos,
     ReplacePane,
     NewInPlacePluginPane,
-    DumpLayoutToHd,
+    SerializeLayoutForResurrection,
     RenameSession,
     DumpLayoutToPlugin,
     ListClientsMetadata,
@@ -375,6 +377,22 @@ pub enum ScreenContext {
     SetFloatingPanePinned,
     StackPanes,
     ChangeFloatingPanesCoordinates,
+    AddHighlightPaneFrameColorOverride,
+    GroupAndUngroupPanes,
+    HighlightAndUnhighlightPanes,
+    FloatMultiplePanes,
+    EmbedMultiplePanes,
+    TogglePaneInGroup,
+    ToggleGroupMarking,
+    SessionSharingStatusChange,
+    SetMouseSelectionSupport,
+    InterceptKeyPresses,
+    ClearKeyPressesIntercepts,
+    ReplacePaneWithExistingPane,
+    AddWatcherClient,
+    RemoveWatcherClient,
+    SetFollowedClient,
+    WatcherTerminalResize, // NEW
 }
 
 /// Stack call representations corresponding to the different types of [`PtyInstruction`]s.
@@ -399,6 +417,7 @@ pub enum PtyContext {
     ListClientsMetadata,
     Reconfigure,
     ListClientsToPlugin,
+    ReportPluginCwd,
     Exit,
 }
 
@@ -438,6 +457,9 @@ pub enum PluginContext {
     FailedToWriteConfigToDisk,
     ListClientsToPlugin,
     ChangePluginHostDir,
+    WebServerStarted,
+    FailedToStartWebServer,
+    PaneRenderReport,
 }
 
 /// Stack call representations corresponding to the different types of [`ClientInstruction`]s.
@@ -461,6 +483,9 @@ pub enum ClientContext {
     CliPipeOutput,
     QueryTerminalSize,
     WriteConfigToDisk,
+    StartWebServer,
+    RenamedSession,
+    ConfigFileUpdated,
 }
 
 /// Stack call representations corresponding to the different types of [`ServerInstruction`]s.
@@ -489,6 +514,12 @@ pub enum ServerContext {
     ConfigWrittenToDisk,
     FailedToWriteConfigToDisk,
     RebindKeys,
+    StartWebServer,
+    ShareCurrentSession,
+    StopSharingCurrentSession,
+    WebServerStarted,
+    FailedToStartWebServer,
+    SendWebClientsForbidden,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -511,6 +542,10 @@ pub enum BackgroundJobContext {
     RunCommand,
     WebRequest,
     ReportPluginList,
+    ListWebSessions,
+    RenderToClients,
+    HighlightPanesWithMessage,
+    QueryZellijWebServerStatus,
     Exit,
 }
 
@@ -650,7 +685,7 @@ mod not_wasm {
     }
 
     /// Custom panic handler/hook. Prints the [`ErrorContext`].
-    pub fn handle_panic<T>(info: &PanicHookInfo<'_>, sender: &SenderWithContext<T>)
+    pub fn handle_panic<T>(info: &PanicHookInfo<'_>, sender: Option<&SenderWithContext<T>>)
     where
         T: ErrorInstruction + Clone,
     {
@@ -699,14 +734,14 @@ mod not_wasm {
             )
         );
 
-        if thread == "main" {
+        if thread == "main" || sender.is_none() {
             // here we only show the first line because the backtrace is not readable otherwise
             // a better solution would be to escape raw mode before we do this, but it's not trivial
             // to get os_input here
             println!("\u{1b}[2J{}", fmt_report(report));
             process::exit(1);
         } else {
-            let _ = sender.send(T::error(fmt_report(report)));
+            let _ = sender.unwrap().send(T::error(fmt_report(report)));
         }
     }
 
@@ -785,7 +820,7 @@ mod not_wasm {
     /// Helper trait to convert error types that don't satisfy `anyhow`s trait requirements to
     /// anyhow errors.
     pub trait ToAnyhow<U> {
-        fn to_anyhow(self) -> crate::anyhow::Result<U>;
+        fn to_anyhow(self) -> anyhow::Result<U>;
     }
 
     /// `SendError` doesn't satisfy `anyhow`s trait requirements due to `T` possibly being a
@@ -798,19 +833,19 @@ mod not_wasm {
     impl<T: std::fmt::Debug, U> ToAnyhow<U>
         for Result<U, crate::channels::SendError<(T, ErrorContext)>>
     {
-        fn to_anyhow(self) -> crate::anyhow::Result<U> {
+        fn to_anyhow(self) -> anyhow::Result<U> {
             match self {
-                Ok(val) => crate::anyhow::Ok(val),
+                Ok(val) => anyhow::Ok(val),
                 Err(e) => {
                     let (msg, context) = e.into_inner();
                     if *crate::consts::DEBUG_MODE.get().unwrap_or(&true) {
-                        Err(crate::anyhow::anyhow!(
+                        Err(anyhow::anyhow!(
                             "failed to send message to channel: {:#?}",
                             msg
                         ))
                         .with_context(|| context.to_string())
                     } else {
-                        Err(crate::anyhow::anyhow!("failed to send message to channel"))
+                        Err(anyhow::anyhow!("failed to send message to channel"))
                             .with_context(|| context.to_string())
                     }
                 },
@@ -819,16 +854,14 @@ mod not_wasm {
     }
 
     impl<U> ToAnyhow<U> for Result<U, std::sync::PoisonError<U>> {
-        fn to_anyhow(self) -> crate::anyhow::Result<U> {
+        fn to_anyhow(self) -> anyhow::Result<U> {
             match self {
-                Ok(val) => crate::anyhow::Ok(val),
+                Ok(val) => anyhow::Ok(val),
                 Err(e) => {
                     if *crate::consts::DEBUG_MODE.get().unwrap_or(&true) {
-                        Err(crate::anyhow::anyhow!(
-                            "cannot acquire poisoned lock for {e:#?}"
-                        ))
+                        Err(anyhow::anyhow!("cannot acquire poisoned lock for {e:#?}"))
                     } else {
-                        Err(crate::anyhow::anyhow!("cannot acquire poisoned lock"))
+                        Err(anyhow::anyhow!("cannot acquire poisoned lock"))
                     }
                 },
             }

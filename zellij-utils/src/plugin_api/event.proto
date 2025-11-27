@@ -54,6 +54,11 @@ enum EventType {
     FailedToChangeHostFolder = 28;
     PastedText = 29;
     ConfigWasWrittenToDisk = 30;
+    WebServerStatus = 31;
+    BeforeClose = 32;
+    FailedToStartWebServer = 34;
+    InterceptedKeyPress = 35;
+    PaneRenderReport = 36;
 }
 
 message EventNameList {
@@ -88,11 +93,30 @@ message Event {
     HostFolderChangedPayload host_folder_changed_payload = 24;
     FailedToChangeHostFolderPayload failed_to_change_host_folder_payload = 25;
     PastedTextPayload pasted_text_payload = 26;
+    WebServerStatusPayload web_server_status_payload = 27;
+    FailedToStartWebServerPayload failed_to_start_web_server_payload = 28;
+    key.Key intercepted_key_payload = 29;
+    PaneRenderReportPayload pane_render_report_payload = 30;
   }
+}
+
+message FailedToStartWebServerPayload {
+  string error = 1;
 }
 
 message PastedTextPayload {
   string pasted_text = 1;
+}
+
+enum WebServerStatusIndication {
+  Online = 0;
+  Offline = 1;
+  DifferentVersion = 2;
+}
+
+message WebServerStatusPayload {
+  WebServerStatusIndication web_server_status_indication = 1;
+  optional string payload = 2;
 }
 
 message FailedToChangeHostFolderPayload {
@@ -257,7 +281,9 @@ message SessionManifest {
   bool is_current_session = 5;
   repeated LayoutInfo available_layouts = 6;
   repeated PluginInfo plugins = 7;
-  repeated ClientTabHistory tab_history = 8;
+  bool web_clients_allowed = 8;
+  uint32 web_client_count = 9;
+  repeated ClientTabHistory tab_history = 10;
 }
 
 message ClientTabHistory {
@@ -304,6 +330,12 @@ message PaneInfo {
     optional string terminal_command = 20;
     optional string plugin_url = 21;
     bool is_selectable = 22;
+    repeated IndexInPaneGroup index_in_pane_group = 23;
+}
+
+message IndexInPaneGroup {
+  uint32 client_id = 1;
+  uint32 index = 2;
 }
 
 message TabInfo {
@@ -334,6 +366,19 @@ message ModeUpdatePayload {
   optional input_mode.InputMode base_mode = 6;
   optional string editor = 7;
   optional string shell = 8;
+  optional bool web_clients_allowed = 9;
+  optional WebSharing web_sharing = 10;
+  optional bool currently_marking_pane_group = 11;
+  optional bool is_web_client = 12;
+  optional string web_server_ip = 13;
+  optional uint32 web_server_port = 14;
+  optional bool web_server_capability = 15;
+}
+
+enum WebSharing {
+    On = 0;
+    Off = 1;
+    Disabled = 2;
 }
 
 message InputModeKeybinds {
@@ -344,4 +389,32 @@ message InputModeKeybinds {
 message KeyBind {
   key.Key key = 1;
   repeated action.Action action = 2;
+}
+
+message PaneRenderReportPayload {
+  repeated PaneContentsEntry pane_contents = 1;
+}
+
+message PaneContentsEntry {
+  PaneId pane_id = 1;
+  PaneContents pane_contents = 2;
+}
+
+message PaneContents {
+  repeated string viewport = 1;
+  optional SelectedText selected_text = 2;
+  repeated string lines_above_viewport = 3;
+  repeated string lines_below_viewport = 4;
+}
+
+message PaneScrollbackResponse {
+  oneof response {
+    PaneContents ok = 1;
+    string err = 2;
+  }
+}
+
+message SelectedText {
+  action.Position start = 1;
+  action.Position end = 2;
 }

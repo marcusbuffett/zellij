@@ -6,6 +6,7 @@ use crate::panes::{
     terminal_character::{render_first_run_banner, TerminalCharacter, EMPTY_TERMINAL_CHARACTER},
 };
 use crate::pty::VteBytes;
+use crate::route::NotificationEnd;
 use crate::tab::{AdjustedInput, Pane};
 use crate::ClientId;
 use std::cell::RefCell;
@@ -13,6 +14,8 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::rc::Rc;
 use std::time::{self, Instant};
+use vte;
+use zellij_utils::data::PaneContents;
 use zellij_utils::input::command::RunCommand;
 use zellij_utils::input::mouse::{MouseEvent, MouseEventType};
 use zellij_utils::pane_size::Offset;
@@ -27,7 +30,6 @@ use zellij_utils::{
     pane_size::SizeInPixels,
     position::Position,
     shared::make_terminal_title,
-    vte,
 };
 
 use crate::ui::pane_boundaries_frame::{FrameParams, PaneFrame};
@@ -140,6 +142,7 @@ pub struct TerminalPane {
     invoked_with: Option<Run>,
     #[allow(dead_code)]
     arrow_fonts: bool,
+    notification_end: Option<NotificationEnd>,
 }
 
 impl Pane for TerminalPane {
@@ -213,14 +216,14 @@ impl Pane for TerminalPane {
         key_with_modifier: &Option<KeyWithModifier>,
         raw_input_bytes: Vec<u8>,
         raw_input_bytes_are_kitty: bool,
-        _client_id: Option<ClientId>,
+        client_id: Option<ClientId>,
     ) -> Option<AdjustedInput> {
         // there are some cases in which the terminal state means that input sent to it
         // needs to be adjusted.
         // here we match against those cases - if need be, we adjust the input and if not
         // we send back the original input
 
-        self.reset_selection();
+        self.reset_selection(client_id);
         if !self.grid.bracketed_paste_mode {
             // Zellij itself operates in bracketed paste mode, so the terminal sends these
             // instructions (bracketed paste start and bracketed paste end respectively)
@@ -464,7 +467,7 @@ impl Pane for TerminalPane {
         let pane_title = if self.pane_name.is_empty() && input_mode == InputMode::RenamePane {
             "Enter name..."
         } else if self.pane_name.is_empty() {
-            self.grid.title.as_deref().unwrap_or(&self.pane_title)
+            self.grid.title.as_deref().unwrap_or("")
         } else {
             &self.pane_name
         };
@@ -527,7 +530,7 @@ impl Pane for TerminalPane {
         self.geom.y -= count;
         self.reflow_lines();
     }
-    fn dump_screen(&self, full: bool) -> String {
+    fn dump_screen(&self, full: bool, _client_id: Option<ClientId>) -> String {
         self.grid.dump_screen(full)
     }
     fn clear_screen(&mut self) {
@@ -600,11 +603,11 @@ impl Pane for TerminalPane {
         self.set_should_render(true);
     }
 
-    fn reset_selection(&mut self) {
+    fn reset_selection(&mut self, _client_id: Option<ClientId>) {
         self.grid.reset_selection();
     }
 
-    fn get_selected_text(&self) -> Option<String> {
+    fn get_selected_text(&self, _client_id: ClientId) -> Option<String> {
         self.grid.get_selected_text()
     }
 
@@ -739,6 +742,11 @@ impl Pane for TerminalPane {
     fn hold(&mut self, exit_status: Option<i32>, is_first_run: bool, run_command: RunCommand) {
         self.invoked_with = Some(Run::Command(run_command.clone()));
         self.is_held = Some((exit_status, is_first_run, run_command));
+        if let Some(notification_end) = self.notification_end.as_mut() {
+            if let Some(exit_status) = exit_status {
+                notification_end.set_exit_status(exit_status);
+            }
+        }
         if is_first_run {
             self.render_first_run_banner();
         }
@@ -747,7 +755,16 @@ impl Pane for TerminalPane {
     fn add_red_pane_frame_color_override(&mut self, error_text: Option<String>) {
         self.pane_frame_color_override = Some((self.style.colors.exit_code_error.base, error_text));
     }
-    fn clear_pane_frame_color_override(&mut self) {
+    fn add_highlight_pane_frame_color_override(
+        &mut self,
+        text: Option<String>,
+        _client_id: Option<ClientId>,
+    ) {
+        // TODO: if we have a client_id, we should only highlight the frame for this client
+        self.pane_frame_color_override = Some((self.style.colors.frame_highlight.base, text));
+    }
+    fn clear_pane_frame_color_override(&mut self, _client_id: Option<ClientId>) {
+        // TODO: if we have a client_id, we should only clear the highlight for this client
         self.pane_frame_color_override = None;
     }
     fn frame_color_override(&self) -> Option<PaletteColor> {
@@ -877,6 +894,18 @@ impl Pane for TerminalPane {
     fn reset_logical_position(&mut self) {
         self.geom.logical_position = None;
     }
+    fn pane_contents(
+        &self,
+        _client_id: Option<ClientId>,
+        get_full_scrollback: bool,
+    ) -> PaneContents {
+        self.grid.pane_contents(get_full_scrollback)
+    }
+    fn update_exit_status(&mut self, exit_status: i32) {
+        if let Some(notification_end) = self.notification_end.as_mut() {
+            notification_end.set_exit_status(exit_status);
+        }
+    }
 }
 
 impl TerminalPane {
@@ -898,6 +927,7 @@ impl TerminalPane {
         arrow_fonts: bool,
         styled_underlines: bool,
         explicitly_disable_keyboard_protocol: bool,
+        notification_end: Option<NotificationEnd>,
     ) -> TerminalPane {
         let initial_pane_title =
             initial_pane_title.unwrap_or_else(|| format!("Pane #{}", pane_index));
@@ -939,6 +969,7 @@ impl TerminalPane {
             pane_frame_color_override: None,
             invoked_with,
             arrow_fonts,
+            notification_end,
         }
     }
     pub fn get_x(&self) -> usize {

@@ -5,7 +5,6 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use zellij_utils::data::Style;
 use zellij_utils::errors::prelude::*;
-use zellij_utils::regex::Regex;
 
 use std::{
     cmp::Ordering,
@@ -14,13 +13,13 @@ use std::{
     str,
 };
 
+use vte;
 use zellij_utils::{
     consts::{DEFAULT_SCROLL_BUFFER_SIZE, SCROLL_BUFFER_SIZE},
     data::{Palette, PaletteColor, Styling},
     input::mouse::{MouseEvent, MouseEventType},
     pane_size::SizeInPixels,
     position::Position,
-    vte,
 };
 
 const TABSTOP_WIDTH: usize = 8; // TODO: is this always right?
@@ -31,14 +30,16 @@ use zellij_utils::{consts::VERSION, shared::version_number};
 
 use crate::output::{CharacterChunk, OutputBuffer, SixelImageChunk};
 use crate::panes::alacritty_functions::{parse_number, xparse_color};
+use crate::panes::hyperlink_tracker::HyperlinkTracker;
 use crate::panes::link_handler::LinkHandler;
 use crate::panes::search::SearchResult;
-use crate::panes::selection::Selection;
 use crate::panes::terminal_character::{
     AnsiCode, CharsetIndex, Cursor, CursorShape, RcCharacterStyles, StandardCharset,
     TerminalCharacter, EMPTY_TERMINAL_CHARACTER,
 };
+use crate::panes::Selection;
 use crate::ui::components::UiComponentParser;
+use zellij_utils::data::PaneContents;
 
 fn get_top_non_canonical_rows(rows: &mut Vec<Row>) -> Vec<Row> {
     let mut index_of_last_non_canonical_row = None;
@@ -271,7 +272,7 @@ fn subtract_isize_from_usize(u: usize, i: isize) -> usize {
 macro_rules! dump_screen {
     ($lines:expr) => {{
         let mut is_first = true;
-        let mut buf = "".to_owned();
+        let mut buf = String::with_capacity($lines.iter().map(|l| l.len()).sum());
 
         for line in &$lines {
             if line.is_canonical && !is_first {
@@ -280,8 +281,7 @@ macro_rules! dump_screen {
             let s: String = (&line.columns).into_iter().map(|x| x.character).collect();
             // Replace the spaces at the end of the line. Sometimes, the lines are
             // collected with spaces until the end of the panel.
-            let re = Regex::new("([^ ])[ ]*$").unwrap();
-            buf.push_str(&(re.replace(&s, "${1}")));
+            buf.push_str(&s.trim_end_matches(' '));
             is_first = false;
         }
         buf
@@ -320,11 +320,7 @@ pub struct Grid {
     cursor: Cursor,
     cursor_is_hidden: bool,
     saved_cursor_position: Option<Cursor>,
-    // FIXME: change scroll_region to be (usize, usize) - where the top line is always the first
-    // line of the viewport and the bottom line the last unless it's changed with CSI r and friends
-    // Having it as an Option causes lots of complexity and issues, and according to DECSTBM, this
-    // should be the behaviour anyway
-    scroll_region: Option<(usize, usize)>,
+    scroll_region: (usize, usize),
     active_charset: CharsetIndex,
     preceding_char: Option<TerminalCharacter>,
     terminal_emulator_colors: Rc<RefCell<Palette>>,
@@ -367,6 +363,7 @@ pub struct Grid {
     explicitly_disable_kitty_keyboard_protocol: bool, // has kitty keyboard support been explicitly
     // disabled by user config?
     click: Click,
+    hyperlink_tracker: HyperlinkTracker,
 }
 
 const CLICK_TIME_THRESHOLD: u128 = 400; // Doherty Threshold
@@ -511,7 +508,7 @@ impl Grid {
             cursor: Cursor::new(0, 0, styled_underlines),
             cursor_is_hidden: false,
             saved_cursor_position: None,
-            scroll_region: None,
+            scroll_region: (0, rows.saturating_sub(1)),
             preceding_char: None,
             width: columns,
             height: rows,
@@ -554,6 +551,7 @@ impl Grid {
             supports_kitty_keyboard_protocol: false,
             explicitly_disable_kitty_keyboard_protocol,
             click: Click::default(),
+            hyperlink_tracker: HyperlinkTracker::new(),
         }
     }
     pub fn render_full_viewport(&mut self) {
@@ -1033,9 +1031,7 @@ impl Grid {
         }
         self.height = new_rows;
         self.width = new_columns;
-        if self.scroll_region.is_some() {
-            self.set_scroll_region_to_viewport_size();
-        }
+        self.set_scroll_region_to_viewport_size();
         self.scrollback_buffer_lines = self.recalculate_scrollback_buffer_count();
         self.search_results.selections.clear();
         self.search_viewport();
@@ -1113,9 +1109,11 @@ impl Grid {
                 for line in &self.viewport {
                     to_serialize.push(line.clone())
                 }
-                self.output_buffer.serialize(to_serialize.as_slice()).ok()
+                self.output_buffer
+                    .serialize(to_serialize.as_slice(), None)
+                    .ok()
             },
-            None => self.output_buffer.serialize(&self.viewport).ok(),
+            None => self.output_buffer.serialize(&self.viewport, None).ok(),
         }
     }
     pub fn render(
@@ -1254,44 +1252,36 @@ impl Grid {
         }
     }
     pub fn rotate_scroll_region_up(&mut self, count: usize) {
-        if let Some((scroll_region_top, scroll_region_bottom)) = self
-            .scroll_region
-            .or_else(|| Some((0, self.height.saturating_sub(1))))
-        {
-            self.pad_lines_until(scroll_region_bottom, EMPTY_TERMINAL_CHARACTER);
-            for _ in 0..count {
-                if self.cursor.y >= scroll_region_top && self.cursor.y <= scroll_region_bottom {
-                    if self.viewport.get(scroll_region_bottom).is_some() {
-                        self.viewport.remove(scroll_region_bottom);
-                    }
-                    let mut pad_character = EMPTY_TERMINAL_CHARACTER;
-                    pad_character.styles = self.cursor.pending_styles.clone();
-                    let columns = VecDeque::from(vec![pad_character; self.width]);
-                    self.viewport
-                        .insert(scroll_region_top, Row::from_columns(columns).canonical());
+        let (scroll_region_top, scroll_region_bottom) = self.scroll_region;
+        self.pad_lines_until(scroll_region_bottom, EMPTY_TERMINAL_CHARACTER);
+        for _ in 0..count {
+            if self.cursor.y >= scroll_region_top && self.cursor.y <= scroll_region_bottom {
+                if self.viewport.get(scroll_region_bottom).is_some() {
+                    self.viewport.remove(scroll_region_bottom);
                 }
+                let mut pad_character = EMPTY_TERMINAL_CHARACTER;
+                pad_character.styles = self.cursor.pending_styles.clone();
+                let columns = VecDeque::from(vec![pad_character; self.width]);
+                self.viewport
+                    .insert(scroll_region_top, Row::from_columns(columns).canonical());
             }
-            self.output_buffer.update_all_lines(); // TODO: only update scroll region lines
         }
+        self.output_buffer.update_all_lines(); // TODO: only update scroll region lines
     }
     pub fn rotate_scroll_region_down(&mut self, count: usize) {
-        if let Some((scroll_region_top, scroll_region_bottom)) = self
-            .scroll_region
-            .or_else(|| Some((0, self.height.saturating_sub(1))))
-        {
-            self.pad_lines_until(scroll_region_bottom, EMPTY_TERMINAL_CHARACTER);
-            let mut pad_character = EMPTY_TERMINAL_CHARACTER;
-            pad_character.styles = self.cursor.pending_styles.clone();
-            for _ in 0..count {
-                if scroll_region_top < self.viewport.len() {
-                    self.viewport.remove(scroll_region_top);
-                }
-                let columns = VecDeque::from(vec![pad_character.clone(); self.width]);
-                self.viewport
-                    .insert(scroll_region_bottom, Row::from_columns(columns).canonical());
+        let (scroll_region_top, scroll_region_bottom) = self.scroll_region;
+        self.pad_lines_until(scroll_region_bottom, EMPTY_TERMINAL_CHARACTER);
+        let mut pad_character = EMPTY_TERMINAL_CHARACTER;
+        pad_character.styles = self.cursor.pending_styles.clone();
+        for _ in 0..count {
+            if scroll_region_top < self.viewport.len() {
+                self.viewport.remove(scroll_region_top);
             }
-            self.output_buffer.update_all_lines(); // TODO: only update scroll region lines
+            let columns = VecDeque::from(vec![pad_character.clone(); self.width]);
+            self.viewport
+                .insert(scroll_region_bottom, Row::from_columns(columns).canonical());
         }
+        self.output_buffer.update_all_lines(); // TODO: only update scroll region lines
     }
     pub fn fill_viewport(&mut self, character: TerminalCharacter) {
         if self.alternate_screen_state.is_some() {
@@ -1307,45 +1297,45 @@ impl Grid {
         self.output_buffer.update_all_lines();
     }
     pub fn add_canonical_line(&mut self) {
-        if let Some((scroll_region_top, scroll_region_bottom)) = self.scroll_region {
-            if self.cursor.y == scroll_region_bottom {
-                // end of scroll region
-                // when we have a scroll region set and we're at its bottom
-                // we need to delete its first line, thus shifting all lines in it upwards
-                // then we add an empty line at its end which will be filled by the application
-                // controlling the scroll region (presumably filled by whatever comes next in the
-                // scroll buffer, but that's not something we control)
-                if scroll_region_top >= self.viewport.len() {
-                    // the state is corrupted
-                    return;
-                }
-                if scroll_region_bottom == self.height - 1 && scroll_region_top == 0 {
-                    if self.alternate_screen_state.is_none() {
-                        self.transfer_rows_to_lines_above(1);
-                    } else {
-                        self.viewport.remove(0);
-                    }
-
-                    let mut pad_character = EMPTY_TERMINAL_CHARACTER;
-                    pad_character.styles = self.cursor.pending_styles.clone();
-                    let columns = VecDeque::from(vec![pad_character; self.width]);
-                    self.viewport.push(Row::from_columns(columns).canonical());
-                    self.selection.move_up(1);
-                } else {
-                    self.viewport.remove(scroll_region_top);
-                    let mut pad_character = EMPTY_TERMINAL_CHARACTER;
-                    pad_character.styles = self.cursor.pending_styles.clone();
-                    let columns = VecDeque::from(vec![pad_character; self.width]);
-                    if self.viewport.len() >= scroll_region_bottom {
-                        self.viewport
-                            .insert(scroll_region_bottom, Row::from_columns(columns).canonical());
-                    } else {
-                        self.viewport.push(Row::from_columns(columns).canonical());
-                    }
-                }
-                self.output_buffer.update_all_lines(); // TODO: only update scroll region lines
+        let (scroll_region_top, scroll_region_bottom) = self.scroll_region;
+        self.hyperlink_tracker.update(
+            '\n',
+            &self.cursor,
+            &mut self.viewport,
+            &mut self.lines_above,
+            &mut self.link_handler.borrow_mut(),
+        );
+        if self.cursor.y == scroll_region_bottom {
+            // end of scroll region
+            // when we have a scroll region set and we're at its bottom
+            // we need to delete its first line, thus shifting all lines in it upwards
+            // then we add an empty line at its end which will be filled by the application
+            // controlling the scroll region (presumably filled by whatever comes next in the
+            // scroll buffer, but that's not something we control)
+            if scroll_region_top >= self.viewport.len() {
+                // the state is corrupted
                 return;
             }
+            if scroll_region_bottom == self.height.saturating_sub(1) && scroll_region_top == 0 {
+                if self.alternate_screen_state.is_none() {
+                    self.transfer_rows_to_lines_above(1);
+                } else {
+                    self.viewport.remove(0);
+                }
+
+                self.viewport.push(Row::new().canonical());
+                self.selection.move_up(1);
+            } else {
+                self.viewport.remove(scroll_region_top);
+                if self.viewport.len() >= scroll_region_bottom {
+                    self.viewport
+                        .insert(scroll_region_bottom, Row::new().canonical());
+                } else {
+                    self.viewport.push(Row::new().canonical());
+                }
+            }
+            self.output_buffer.update_all_lines(); // TODO: only update scroll region lines
+            return;
         }
         if self.viewport.len() <= self.cursor.y + 1 {
             // FIXME: this should add an empty line with the pad_character
@@ -1355,16 +1345,6 @@ impl Grid {
             self.viewport.push(new_row);
         }
         if self.cursor.y == self.height.saturating_sub(1) {
-            if self.scroll_region.is_none() {
-                if self.alternate_screen_state.is_none() {
-                    self.transfer_rows_to_lines_above(1);
-                } else {
-                    self.sixel_grid.offset_grid_top();
-                    self.viewport.remove(0);
-                }
-
-                self.selection.move_up(1);
-            }
             self.output_buffer.update_all_lines();
         } else {
             self.cursor.y += 1;
@@ -1379,6 +1359,13 @@ impl Grid {
         terminal_character: TerminalCharacter,
         should_insert_character: bool,
     ) {
+        self.hyperlink_tracker.update(
+            terminal_character.character,
+            &self.cursor,
+            &mut self.viewport,
+            &mut self.lines_above,
+            &mut self.link_handler.borrow_mut(),
+        );
         // this function assumes the current line has enough room for terminal_character (that its
         // width has been checked beforehand)
         match self.viewport.get_mut(self.cursor.y) {
@@ -1444,14 +1431,14 @@ impl Grid {
         self.move_cursor_forward_until_edge(character_width);
     }
     pub fn get_character_under_cursor(&self) -> Option<TerminalCharacter> {
-        let absolute_x_in_line = self.get_absolute_character_index(self.cursor.x, self.cursor.y);
+        let absolute_x_in_line = self.get_absolute_character_index(self.cursor.x, self.cursor.y)?;
         self.viewport
             .get(self.cursor.y)
             .and_then(|current_line| current_line.columns.get(absolute_x_in_line))
             .cloned()
     }
-    pub fn get_absolute_character_index(&self, x: usize, y: usize) -> usize {
-        self.viewport.get(y).unwrap().absolute_character_index(x)
+    pub fn get_absolute_character_index(&self, x: usize, y: usize) -> Option<usize> {
+        Some(self.viewport.get(y)?.absolute_character_index(x))
     }
     pub fn move_cursor_forward_until_edge(&mut self, count: usize) {
         let count_to_move = std::cmp::min(count, self.width.saturating_sub(self.cursor.x));
@@ -1508,6 +1495,7 @@ impl Grid {
         if self.cursor.y == self.height.saturating_sub(1) {
             if self.alternate_screen_state.is_none() {
                 self.transfer_rows_to_lines_above(1);
+                self.hyperlink_tracker.offset_cursor_lines(1);
             } else {
                 self.viewport.remove(0);
             }
@@ -1550,37 +1538,26 @@ impl Grid {
         }
     }
     pub fn move_cursor_to(&mut self, x: usize, y: usize, pad_character: TerminalCharacter) {
-        match self.scroll_region {
-            Some((scroll_region_top, scroll_region_bottom)) => {
-                self.cursor.x = std::cmp::min(self.width - 1, x);
-                let y_offset = if self.erasure_mode {
-                    scroll_region_top
-                } else {
-                    0
-                };
-                if y >= scroll_region_top && y <= scroll_region_bottom {
-                    self.cursor.y = std::cmp::min(scroll_region_bottom, y + y_offset);
-                } else {
-                    self.cursor.y = std::cmp::min(self.height - 1, y + y_offset);
-                }
-                self.pad_lines_until(self.cursor.y, pad_character.clone());
-                self.pad_current_line_until(self.cursor.x, pad_character);
-            },
-            None => {
-                self.cursor.x = std::cmp::min(self.width - 1, x);
-                self.cursor.y = std::cmp::min(self.height - 1, y);
-                self.pad_lines_until(self.cursor.y, pad_character.clone());
-                self.pad_current_line_until(self.cursor.x, pad_character);
-            },
+        let (scroll_region_top, scroll_region_bottom) = self.scroll_region;
+        self.cursor.x = std::cmp::min(self.width - 1, x);
+        let y_offset = if self.erasure_mode {
+            scroll_region_top
+        } else {
+            0
+        };
+        if y >= scroll_region_top && y <= scroll_region_bottom {
+            self.cursor.y = std::cmp::min(scroll_region_bottom, y + y_offset);
+        } else {
+            self.cursor.y = std::cmp::min(self.height.saturating_sub(1), y + y_offset);
         }
+        self.pad_lines_until(self.cursor.y, pad_character.clone());
+        self.pad_current_line_until(self.cursor.x, pad_character);
     }
     pub fn move_cursor_up(&mut self, count: usize) {
-        if let Some((scroll_region_top, scroll_region_bottom)) = self.scroll_region {
-            if self.cursor.y >= scroll_region_top && self.cursor.y <= scroll_region_bottom {
-                self.cursor.y =
-                    std::cmp::max(self.cursor.y.saturating_sub(count), scroll_region_top);
-                return;
-            }
+        let (scroll_region_top, scroll_region_bottom) = self.scroll_region;
+        if self.cursor.y >= scroll_region_top && self.cursor.y <= scroll_region_bottom {
+            self.cursor.y = std::cmp::max(self.cursor.y.saturating_sub(count), scroll_region_top);
+            return;
         }
         self.cursor.y = if self.cursor.y < count {
             0
@@ -1589,8 +1566,7 @@ impl Grid {
         };
     }
     pub fn move_cursor_up_with_scrolling(&mut self, count: usize) {
-        let (scroll_region_top, scroll_region_bottom) =
-            self.scroll_region.unwrap_or((0, self.height - 1));
+        let (scroll_region_top, scroll_region_bottom) = self.scroll_region;
         for _ in 0..count {
             let current_line_index = self.cursor.y;
             if current_line_index == scroll_region_top {
@@ -1615,11 +1591,10 @@ impl Grid {
         count: usize,
         pad_character: TerminalCharacter,
     ) {
-        if let Some((scroll_region_top, scroll_region_bottom)) = self.scroll_region {
-            if self.cursor.y >= scroll_region_top && self.cursor.y <= scroll_region_bottom {
-                self.cursor.y = std::cmp::min(self.cursor.y + count, scroll_region_bottom);
-                return;
-            }
+        let (scroll_region_top, scroll_region_bottom) = self.scroll_region;
+        if self.cursor.y >= scroll_region_top && self.cursor.y <= scroll_region_bottom {
+            self.cursor.y = std::cmp::min(self.cursor.y + count, scroll_region_bottom);
+            return;
         }
         self.cursor.y = std::cmp::min(self.cursor.y + count, self.height - 1);
         self.pad_lines_until(self.cursor.y, pad_character);
@@ -1643,42 +1618,37 @@ impl Grid {
     }
     pub fn set_scroll_region(&mut self, top_line_index: usize, bottom_line_index: Option<usize>) {
         let bottom_line_index = bottom_line_index.unwrap_or(self.height.saturating_sub(1));
-        self.scroll_region = Some((top_line_index, bottom_line_index));
+        self.scroll_region = (top_line_index, bottom_line_index);
         let mut pad_character = EMPTY_TERMINAL_CHARACTER;
         pad_character.styles = self.cursor.pending_styles.clone();
         self.move_cursor_to(0, 0, pad_character); // DECSTBM moves the cursor to column 1 line 1 of the page
     }
-    pub fn clear_scroll_region(&mut self) {
-        self.scroll_region = None;
-    }
     pub fn set_scroll_region_to_viewport_size(&mut self) {
-        self.scroll_region = Some((0, self.height.saturating_sub(1)));
+        self.scroll_region = (0, self.height.saturating_sub(1));
     }
     pub fn delete_lines_in_scroll_region(
         &mut self,
         count: usize,
         pad_character: TerminalCharacter,
     ) {
-        if let Some((scroll_region_top, scroll_region_bottom)) = self.scroll_region {
-            let current_line_index = self.cursor.y;
-            if current_line_index >= scroll_region_top && current_line_index <= scroll_region_bottom
-            {
-                // when deleting lines inside the scroll region, we must make sure it stays the
-                // same size (and that other lines below it aren't shifted inside it)
-                // so we delete the current line(s) and add an empty line at the end of the scroll
-                // region
-                for _ in 0..count {
-                    self.viewport.remove(current_line_index);
-                    let columns = VecDeque::from(vec![pad_character.clone(); self.width]);
-                    if self.viewport.len() > scroll_region_bottom {
-                        self.viewport
-                            .insert(scroll_region_bottom, Row::from_columns(columns).canonical());
-                    } else {
-                        self.viewport.push(Row::from_columns(columns).canonical());
-                    }
+        let (scroll_region_top, scroll_region_bottom) = self.scroll_region;
+        let current_line_index = self.cursor.y;
+        if current_line_index >= scroll_region_top && current_line_index <= scroll_region_bottom {
+            // when deleting lines inside the scroll region, we must make sure it stays the
+            // same size (and that other lines below it aren't shifted inside it)
+            // so we delete the current line(s) and add an empty line at the end of the scroll
+            // region
+            for _ in 0..count {
+                self.viewport.remove(current_line_index);
+                let columns = VecDeque::from(vec![pad_character.clone(); self.width]);
+                if self.viewport.len() > scroll_region_bottom {
+                    self.viewport
+                        .insert(scroll_region_bottom, Row::from_columns(columns).canonical());
+                } else {
+                    self.viewport.push(Row::from_columns(columns).canonical());
                 }
-                self.output_buffer.update_all_lines(); // TODO: move accurately
             }
+            self.output_buffer.update_all_lines(); // TODO: move accurately
         }
     }
     pub fn add_empty_lines_in_scroll_region(
@@ -1686,24 +1656,22 @@ impl Grid {
         count: usize,
         pad_character: TerminalCharacter,
     ) {
-        if let Some((scroll_region_top, scroll_region_bottom)) = self.scroll_region {
-            let current_line_index = self.cursor.y;
-            if current_line_index >= scroll_region_top && current_line_index <= scroll_region_bottom
-            {
-                // when adding empty lines inside the scroll region, we must make sure it stays the
-                // same size and that lines don't "leak" outside of it
-                // so we add an empty line where the cursor currently is, and delete the last line
-                // of the scroll region
-                for _ in 0..count {
-                    if scroll_region_bottom < self.viewport.len() {
-                        self.viewport.remove(scroll_region_bottom);
-                    }
-                    let columns = VecDeque::from(vec![pad_character.clone(); self.width]);
-                    self.viewport
-                        .insert(current_line_index, Row::from_columns(columns).canonical());
+        let (scroll_region_top, scroll_region_bottom) = self.scroll_region;
+        let current_line_index = self.cursor.y;
+        if current_line_index >= scroll_region_top && current_line_index <= scroll_region_bottom {
+            // when adding empty lines inside the scroll region, we must make sure it stays the
+            // same size and that lines don't "leak" outside of it
+            // so we add an empty line where the cursor currently is, and delete the last line
+            // of the scroll region
+            for _ in 0..count {
+                if scroll_region_bottom < self.viewport.len() {
+                    self.viewport.remove(scroll_region_bottom);
                 }
-                self.output_buffer.update_all_lines(); // TODO: move accurately
+                let columns = VecDeque::from(vec![pad_character.clone(); self.width]);
+                self.viewport
+                    .insert(current_line_index, Row::from_columns(columns).canonical());
             }
+            self.output_buffer.update_all_lines(); // TODO: move accurately
         }
     }
     pub fn move_cursor_to_column(&mut self, column: usize) {
@@ -1767,7 +1735,6 @@ impl Grid {
         self.viewport = vec![Row::new().canonical()];
         self.alternate_screen_state = None;
         self.cursor_key_mode = false;
-        self.scroll_region = None;
         self.clear_viewport_before_rendering = true;
         self.cursor = Cursor::new(0, 0, self.styled_underlines);
         self.saved_cursor_position = None;
@@ -1786,6 +1753,7 @@ impl Grid {
         self.focus_event_tracking = false;
         self.cursor_is_hidden = false;
         self.supports_kitty_keyboard_protocol = false;
+        self.set_scroll_region_to_viewport_size();
         if let Some(images_to_reap) = self.sixel_grid.clear() {
             self.sixel_grid.reap_images(images_to_reap);
         }
@@ -2014,8 +1982,10 @@ impl Grid {
         let position_row = self.viewport.get(position.line.0 as usize)?;
 
         let mut position_start = Position::new(position.line.0 as i32, 0);
-        let mut position_end =
-            Position::new(position.line.0 as i32, position_row.columns.len() as u16);
+        let mut position_end = Position::new(
+            position.line.0 as i32,
+            (position_row.columns.len() + position_row.excess_width()) as u16,
+        );
 
         let mut found_canonical_row_start = position_row.is_canonical;
         while !found_canonical_row_start {
@@ -2474,6 +2444,37 @@ impl Grid {
     pub fn update_arrow_fonts(&mut self, should_support_arrow_fonts: bool) {
         self.arrow_fonts = should_support_arrow_fonts;
     }
+    pub fn has_selection(&self) -> bool {
+        !self.selection.is_empty()
+    }
+    pub fn pane_contents(&self, get_full_scrollback: bool) -> PaneContents {
+        let mut viewport: Vec<String> = Vec::with_capacity(self.viewport.len());
+        for row in &self.viewport {
+            let s: String = (&row.columns).into_iter().map(|x| x.character).collect();
+            viewport.push(s);
+        }
+        if get_full_scrollback {
+            let mut lines_above_viewport: Vec<String> = Vec::with_capacity(self.lines_above.len());
+            for row in &self.lines_above {
+                let s: String = (&row.columns).into_iter().map(|x| x.character).collect();
+                lines_above_viewport.push(s);
+            }
+            let mut lines_below_viewport: Vec<String> = Vec::with_capacity(self.lines_below.len());
+            for row in &self.lines_below {
+                let s: String = (&row.columns).into_iter().map(|x| x.character).collect();
+                lines_below_viewport.push(s);
+            }
+            PaneContents::new_with_scrollback(
+                viewport,
+                self.selection.start,
+                self.selection.end,
+                lines_above_viewport,
+                lines_below_viewport,
+            )
+        } else {
+            PaneContents::new(viewport, self.selection.start, self.selection.end)
+        }
+    }
 }
 
 impl Perform for Grid {
@@ -2894,7 +2895,7 @@ impl Perform for Grid {
                         },
                         3 => {
                             // DECCOLM - only side effects
-                            self.scroll_region = None;
+                            self.set_scroll_region_to_viewport_size();
                             self.clear_all(EMPTY_TERMINAL_CHARACTER);
                             self.cursor.x = 0;
                             self.cursor.y = 0;
@@ -2997,7 +2998,7 @@ impl Perform for Grid {
                         },
                         3 => {
                             // DECCOLM - only side effects
-                            self.scroll_region = None;
+                            self.set_scroll_region_to_viewport_size();
                             self.clear_all(EMPTY_TERMINAL_CHARACTER);
                             self.cursor.x = 0;
                             self.cursor.y = 0;
@@ -3079,14 +3080,11 @@ impl Perform for Grid {
                     self.move_cursor_to_beginning_of_line();
                 }
             } else {
-                self.clear_scroll_region();
+                self.set_scroll_region_to_viewport_size();
             }
         } else if c == 'M' {
             // delete lines if currently inside scroll region, or otherwise
             // delete lines in the entire viewport
-            if self.scroll_region.is_none() {
-                self.set_scroll_region_to_viewport_size();
-            }
             let line_count_to_delete = next_param_or(1);
             let mut pad_character = EMPTY_TERMINAL_CHARACTER;
             pad_character.styles = self.cursor.pending_styles.clone();
@@ -3094,9 +3092,6 @@ impl Perform for Grid {
         } else if c == 'L' {
             // insert blank lines if inside scroll region, or otherwise insert
             // blank lines in the entire viewport
-            if self.scroll_region.is_none() {
-                self.set_scroll_region_to_viewport_size();
-            }
             let line_count_to_add = next_param_or(1);
             let mut pad_character = EMPTY_TERMINAL_CHARACTER;
             pad_character.styles = self.cursor.pending_styles.clone();
@@ -3178,8 +3173,14 @@ impl Perform for Grid {
         } else if c == 'u' && intermediates == &[b'>'] {
             // Zellij only supports the first "progressive enhancement" layer of the kitty keyboard
             // protocol
+            // 0 disables, everything else enables.
+            let count = next_param_or(0);
             if !self.explicitly_disable_kitty_keyboard_protocol {
-                self.supports_kitty_keyboard_protocol = true;
+                if count > 0 {
+                    self.supports_kitty_keyboard_protocol = true;
+                } else {
+                    self.supports_kitty_keyboard_protocol = false;
+                }
             }
         } else if c == 'u' && intermediates == &[b'<'] {
             // Zellij only supports the first "progressive enhancement" layer of the kitty keyboard
@@ -3297,10 +3298,7 @@ impl Perform for Grid {
                     // CPR - cursor position report
 
                     // Note that this is relative to scrolling region.
-                    let offset = match self.scroll_region {
-                        Some((scroll_region_top, _scroll_region_bottom)) => scroll_region_top,
-                        _ => 0,
-                    };
+                    let offset = self.scroll_region.0; // scroll_region_top
                     let position_report = format!(
                         "\u{1b}[{};{}R",
                         self.cursor.y + 1 - offset,
@@ -3841,7 +3839,8 @@ impl Row {
         self.columns.len()
     }
     pub fn word_indices_around_character_index(&self, index: usize) -> Option<(usize, usize)> {
-        let character_at_index = self.columns.get(index)?;
+        let absolute_character_index = self.absolute_character_index(index);
+        let character_at_index = self.columns.get(absolute_character_index)?;
         if is_selection_boundary_character(character_at_index.character) {
             return Some((index, index + 1));
         }
@@ -3849,24 +3848,24 @@ impl Row {
             .columns
             .iter()
             .enumerate()
-            .skip(index)
+            .skip(absolute_character_index)
             .find_map(|(i, t_c)| {
                 if is_selection_boundary_character(t_c.character) {
-                    Some(i)
+                    Some(i + self.excess_width_until(i))
                 } else {
                     None
                 }
             })
-            .unwrap_or_else(|| self.columns.len());
+            .unwrap_or_else(|| self.columns.len() + self.excess_width());
         let start_position = self
             .columns
             .iter()
             .enumerate()
-            .take(index)
+            .take(absolute_character_index)
             .rev()
             .find_map(|(i, t_c)| {
                 if is_selection_boundary_character(t_c.character) {
-                    Some(i + 1)
+                    Some(i + 1 + self.excess_width_until(i))
                 } else {
                     None
                 }
@@ -3885,7 +3884,7 @@ impl Row {
             .rev()
             .find_map(|(i, t_c)| {
                 if is_selection_boundary_character(t_c.character) {
-                    Some(i + 1)
+                    Some(self.absolute_character_index(i + 1))
                 } else {
                     None
                 }
@@ -3898,7 +3897,7 @@ impl Row {
             .enumerate()
             .find_map(|(i, t_c)| {
                 if is_selection_boundary_character(t_c.character) {
-                    Some(i)
+                    Some(self.absolute_character_index(i))
                 } else {
                     None
                 }

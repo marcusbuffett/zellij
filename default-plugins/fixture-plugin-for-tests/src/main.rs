@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+#[allow(unused_imports)]
 use std::io::prelude::*;
 use zellij_tile::prelude::*;
 
@@ -7,6 +8,7 @@ use zellij_tile::prelude::*;
 // it is not (and should not!) be included in the mainline executable
 // it's included here for convenience so that it will be built by the CI
 
+#[allow(dead_code)]
 #[derive(Default)]
 struct State {
     received_events: Vec<Event>,
@@ -67,6 +69,7 @@ impl ZellijPlugin for State {
             EventType::FileSystemCreate,
             EventType::FileSystemUpdate,
             EventType::FileSystemDelete,
+            EventType::BeforeClose,
         ]);
         watch_filesystem();
     }
@@ -91,7 +94,9 @@ impl ZellijPlugin for State {
                     }",
                     );
                 },
-                BareKey::Char('c') if key.has_no_modifiers() => new_tab(),
+                BareKey::Char('c') if key.has_no_modifiers() => {
+                    new_tab(Some("new_tab_name"), Some("/path/to/my/cwd"))
+                },
                 BareKey::Char('d') if key.has_no_modifiers() => go_to_next_tab(),
                 BareKey::Char('e') if key.has_no_modifiers() => go_to_previous_tab(),
                 BareKey::Char('f') if key.has_no_modifiers() => {
@@ -485,42 +490,58 @@ impl ZellijPlugin for State {
                         (
                             InputMode::Locked,
                             KeyWithModifier::new(BareKey::Char('a')).with_ctrl_modifier(),
-                            vec![actions::Action::SwitchToMode(InputMode::Normal)],
+                            vec![actions::Action::SwitchToMode {
+                                input_mode: InputMode::Normal,
+                            }],
                         ),
                         (
                             InputMode::Normal,
                             KeyWithModifier::new(BareKey::Char('a')).with_ctrl_modifier(),
-                            vec![actions::Action::SwitchToMode(InputMode::Locked)],
+                            vec![actions::Action::SwitchToMode {
+                                input_mode: InputMode::Locked,
+                            }],
                         ),
                         (
                             InputMode::Pane,
                             KeyWithModifier::new(BareKey::Char('a')).with_ctrl_modifier(),
-                            vec![actions::Action::SwitchToMode(InputMode::Locked)],
+                            vec![actions::Action::SwitchToMode {
+                                input_mode: InputMode::Locked,
+                            }],
                         ),
                         (
                             InputMode::Tab,
                             KeyWithModifier::new(BareKey::Char('a')).with_ctrl_modifier(),
-                            vec![actions::Action::SwitchToMode(InputMode::Locked)],
+                            vec![actions::Action::SwitchToMode {
+                                input_mode: InputMode::Locked,
+                            }],
                         ),
                         (
                             InputMode::Resize,
                             KeyWithModifier::new(BareKey::Char('a')).with_ctrl_modifier(),
-                            vec![actions::Action::SwitchToMode(InputMode::Locked)],
+                            vec![actions::Action::SwitchToMode {
+                                input_mode: InputMode::Locked,
+                            }],
                         ),
                         (
                             InputMode::Move,
                             KeyWithModifier::new(BareKey::Char('a')).with_ctrl_modifier(),
-                            vec![actions::Action::SwitchToMode(InputMode::Locked)],
+                            vec![actions::Action::SwitchToMode {
+                                input_mode: InputMode::Locked,
+                            }],
                         ),
                         (
                             InputMode::Search,
                             KeyWithModifier::new(BareKey::Char('a')).with_ctrl_modifier(),
-                            vec![actions::Action::SwitchToMode(InputMode::Locked)],
+                            vec![actions::Action::SwitchToMode {
+                                input_mode: InputMode::Locked,
+                            }],
                         ),
                         (
                             InputMode::Session,
                             KeyWithModifier::new(BareKey::Char('a')).with_ctrl_modifier(),
-                            vec![actions::Action::SwitchToMode(InputMode::Locked)],
+                            vec![actions::Action::SwitchToMode {
+                                input_mode: InputMode::Locked,
+                            }],
                         ),
                     ];
                     rebind_keys(keys_to_unbind, keys_to_rebind, write_to_disk);
@@ -534,6 +555,10 @@ impl ZellijPlugin for State {
                 if message == "pong" {
                     self.received_payload = Some(payload.clone());
                 }
+            },
+            Event::BeforeClose => {
+                // this is just to assert something to make sure this event was triggered
+                highlight_and_unhighlight_panes(vec![PaneId::Terminal(1)], vec![PaneId::Plugin(1)]);
             },
             Event::SystemClipboardFailure => {
                 // this is just to trigger the worker message
