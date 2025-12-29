@@ -178,6 +178,13 @@ impl TiledPanes {
         let should_relayout = true;
         self.add_pane(pane_id, pane, should_relayout, client_id);
     }
+    pub fn set_pane_logical_position(&mut self, pane_id: PaneId, logical_position: usize) {
+        if let Some(pane) = self.panes.get_mut(&pane_id) {
+            let mut position_and_size = pane.position_and_size();
+            position_and_size.logical_position = Some(logical_position);
+            pane.set_geom(position_and_size);
+        }
+    }
     pub fn insert_pane_without_relayout(
         &mut self,
         pane_id: PaneId,
@@ -313,6 +320,7 @@ impl TiledPanes {
                     Ok(new_pane_geom) => {
                         pane.set_geom(new_pane_geom);
                         self.panes.insert(pane_id, pane); // TODO: is set_geom the right one?
+                        self.expand_pane_in_stack(pane_id);
                     },
                     Err(e) => {
                         log::error!("Failed to add pane to stack: {:?}", e);
@@ -349,7 +357,8 @@ impl TiledPanes {
                 Ok(new_pane_geom) => {
                     pane.set_geom(new_pane_geom);
                     self.panes.insert(pane_id, pane);
-                    self.set_force_render(); // TODO: why do we need this?
+
+                    self.expand_pane_in_stack(pane_id);
                     return;
                 },
                 Err(_e) => {
@@ -447,7 +456,9 @@ impl TiledPanes {
             .map(|p| p.is_stacked())
             .unwrap_or(false);
         if !pane_id_is_stacked {
-            let _ = pane_grid.make_pane_stacked(&root_pane_id);
+            if let Err(e) = pane_grid.make_pane_stacked(&root_pane_id) {
+                log::error!("Failed to make pane stacked: {:?}", e);
+            }
         }
         match pane_grid.make_room_in_stack_of_pane_id_for_pane(&root_pane_id) {
             Ok(new_pane_geom) => {
@@ -1216,8 +1227,12 @@ impl TiledPanes {
         let display_area = self.display_area.borrow();
         new_screen_size.rows != display_area.rows || new_screen_size.cols != display_area.cols
     }
+    pub fn force_resize(&mut self) {
+        let display_area = self.display_area.borrow().clone();
+        self.resize(display_area);
+    }
+
     pub fn resize(&mut self, new_screen_size: Size) {
-        // this is blocked out to appease the borrow checker
         {
             if self.display_area_changed(new_screen_size) {
                 self.clear_tombstones();
@@ -1231,41 +1246,61 @@ impl TiledPanes {
                 *display_area,
                 *viewport,
             );
-            match pane_grid.layout(SplitDirection::Horizontal, cols) {
-                Ok(_) => {
-                    let column_difference = cols as isize - display_area.cols as isize;
-                    // FIXME: Should the viewport be an Offset?
-                    viewport.cols = (viewport.cols as isize + column_difference) as usize;
-                    display_area.cols = cols;
-                },
-                Err(e) => match e.downcast_ref::<ZellijError>() {
-                    Some(ZellijError::PaneSizeUnchanged) => {}, // ignore unchanged layout
-                    _ => {
-                        // display area still changed, even if we had an error
+
+            let resize_horizontally = |pane_grid: &mut TiledPaneGrid,
+                                       display_area: &mut Size,
+                                       viewport: &mut Viewport,
+                                       cols: usize|
+             -> bool {
+                match pane_grid.layout(SplitDirection::Horizontal, cols) {
+                    Ok(_) => {
+                        let column_difference = cols as isize - display_area.cols as isize;
+                        viewport.cols = (viewport.cols as isize + column_difference) as usize;
                         display_area.cols = cols;
-                        Err::<(), _>(anyError::msg(e))
-                            .context("failed to resize tab horizontally")
-                            .non_fatal();
+                        true
                     },
-                },
+                    Err(e) => match e.downcast_ref::<ZellijError>() {
+                        Some(ZellijError::PaneSizeUnchanged) => true,
+                        _ => false,
+                    },
+                }
             };
-            match pane_grid.layout(SplitDirection::Vertical, rows) {
-                Ok(_) => {
-                    let row_difference = rows as isize - display_area.rows as isize;
-                    viewport.rows = (viewport.rows as isize + row_difference) as usize;
-                    display_area.rows = rows;
-                },
-                Err(e) => match e.downcast_ref::<ZellijError>() {
-                    Some(ZellijError::PaneSizeUnchanged) => {}, // ignore unchanged layout
-                    _ => {
-                        // display area still changed, even if we had an error
+
+            let resize_vertically = |pane_grid: &mut TiledPaneGrid,
+                                     display_area: &mut Size,
+                                     viewport: &mut Viewport,
+                                     rows: usize|
+             -> bool {
+                match pane_grid.layout(SplitDirection::Vertical, rows) {
+                    Ok(_) => {
+                        let row_difference = rows as isize - display_area.rows as isize;
+                        viewport.rows = (viewport.rows as isize + row_difference) as usize;
                         display_area.rows = rows;
-                        Err::<(), _>(anyError::msg(e))
-                            .context("failed to resize tab vertically")
-                            .non_fatal();
+                        true
                     },
-                },
+                    Err(e) => match e.downcast_ref::<ZellijError>() {
+                        Some(ZellijError::PaneSizeUnchanged) => true,
+                        _ => false,
+                    },
+                }
             };
+
+            let successfully_resized_horizontally =
+                resize_horizontally(&mut pane_grid, &mut display_area, &mut viewport, cols);
+            if successfully_resized_horizontally {
+                resize_vertically(&mut pane_grid, &mut display_area, &mut viewport, rows);
+            } else {
+                log::warn!("Failed to resize horizontally, attempting to first resize vertically");
+                let successfully_resized_vertically =
+                    resize_vertically(&mut pane_grid, &mut display_area, &mut viewport, rows);
+                if successfully_resized_vertically {
+                    resize_horizontally(&mut pane_grid, &mut display_area, &mut viewport, cols);
+                } else {
+                    log::error!("Failed to resize vertically, will not attempt again.");
+                }
+            }
+            display_area.rows = rows;
+            display_area.cols = cols;
         }
         self.set_pane_frames(self.draw_pane_frames);
     }
@@ -2551,6 +2586,7 @@ impl TiledPanes {
         self.active_panes.focus_all_panes(&mut self.panes);
     }
     pub fn drain(&mut self) -> BTreeMap<PaneId, Box<dyn Pane>> {
+        self.unset_fullscreen();
         match self.panes.iter().next().map(|(pid, _p)| *pid) {
             Some(first_pid) => self.panes.split_off(&first_pid),
             None => BTreeMap::new(),
@@ -2561,6 +2597,18 @@ impl TiledPanes {
     }
     pub fn set_active_panes(&mut self, active_panes: ActivePanes) {
         self.active_panes = active_panes;
+    }
+    pub fn move_client_focus_to_existing_panes(&mut self) {
+        let existing_pane_ids: Vec<PaneId> = self.panes.keys().copied().collect();
+        let nonexisting_panes_that_are_focused = self
+            .active_panes
+            .values()
+            .filter(|pane_id| !existing_pane_ids.contains(pane_id))
+            .copied()
+            .collect::<Vec<_>>();
+        for pane_id in nonexisting_panes_that_are_focused {
+            self.move_clients_out_of_pane(pane_id);
+        }
     }
     fn move_clients_between_panes(&mut self, from_pane_id: PaneId, to_pane_id: PaneId) {
         let clients_in_pane: Vec<ClientId> = self

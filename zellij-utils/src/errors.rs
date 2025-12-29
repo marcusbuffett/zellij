@@ -277,6 +277,7 @@ pub enum ScreenContext {
     ToggleActiveTerminalFullscreen,
     TogglePaneFrames,
     SetSelectable,
+    ShowPluginCursor,
     SetInvisibleBorders,
     SetFixedHeight,
     SetFixedWidth,
@@ -313,10 +314,6 @@ pub enum ScreenContext {
     ToggleTab,
     AddClient,
     RemoveClient,
-    AddOverlay,
-    RemoveOverlay,
-    ConfirmPrompt,
-    DenyPrompt,
     UpdateSearch,
     SearchDown,
     SearchUp,
@@ -327,6 +324,8 @@ pub enum ScreenContext {
     ClearPaneFrameColorOverride,
     PreviousSwapLayout,
     NextSwapLayout,
+    OverrideLayout,
+    OverrideLayoutComplete,
     QueryTabNames,
     NewTiledPluginPane,
     StartOrReloadPluginPane,
@@ -339,6 +338,8 @@ pub enum ScreenContext {
     LaunchOrFocusPlugin,
     LaunchPlugin,
     SuppressPane,
+    UnsuppressPane,
+    UnsuppressOrExpandPane,
     FocusPaneWithId,
     RenamePane,
     RenameTab,
@@ -358,6 +359,7 @@ pub enum ScreenContext {
     ResizePaneWithId,
     EditScrollbackForPaneWithId,
     WriteToPaneId,
+    CopyTextToClipboard,
     MovePaneWithPaneId,
     MovePaneWithPaneIdInDirection,
     ClearScreenForPaneId,
@@ -405,6 +407,7 @@ pub enum PtyContext {
     UpdateActivePane,
     GoToTab,
     NewTab,
+    OverrideLayout,
     ClosePane,
     CloseTab,
     ReRunCommandInPane,
@@ -418,6 +421,10 @@ pub enum PtyContext {
     Reconfigure,
     ListClientsToPlugin,
     ReportPluginCwd,
+    SendSigintToPaneId,
+    SendSigkillToPaneId,
+    GetPanePid,
+    UpdateAndReportCwds,
     Exit,
 }
 
@@ -436,6 +443,7 @@ pub enum PluginContext {
     AddClient,
     RemoveClient,
     NewTab,
+    OverrideLayout,
     ApplyCachedEvents,
     ApplyCachedWorkerMessages,
     PostMessageToPluginWorker,
@@ -460,6 +468,7 @@ pub enum PluginContext {
     WebServerStarted,
     FailedToStartWebServer,
     PaneRenderReport,
+    UserInput,
 }
 
 /// Stack call representations corresponding to the different types of [`ClientInstruction`]s.
@@ -630,6 +639,9 @@ open an issue on GitHub:
 
     #[error("The plugin does not exist")]
     PluginDoesNotExist,
+
+    #[error("Ran out of room for spans")]
+    RanOutOfRoomForSpans,
 }
 
 #[cfg(not(target_family = "wasm"))]

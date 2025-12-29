@@ -1,4 +1,4 @@
-use crate::data::{Direction, InputMode, Resize};
+use crate::data::{Direction, InputMode, Resize, UnblockCondition};
 use crate::setup::Setup;
 use crate::{
     consts::{ZELLIJ_CONFIG_DIR_ENV, ZELLIJ_CONFIG_FILE_ENV},
@@ -143,27 +143,33 @@ pub struct WebCli {
     /// retrieved. Returns the token name and the token.
     #[clap(long, value_parser, exclusive(true), display_order = 5)]
     pub create_token: bool,
+    /// Optional name for the token
+    #[clap(long, value_parser, value_name = "TOKEN_NAME", display_order = 6)]
+    pub token_name: Option<String>,
+    /// Create a read-only login token (can only attach to existing sessions as watcher)
+    #[clap(long, value_parser, exclusive(true), display_order = 7)]
+    pub create_read_only_token: bool,
     /// Revoke a login token by its name
     #[clap(
         long,
         value_parser,
         exclusive(true),
         value_name = "TOKEN NAME",
-        display_order = 6
+        display_order = 8
     )]
     pub revoke_token: Option<String>,
     /// Revoke all login tokens
-    #[clap(long, value_parser, exclusive(true), display_order = 7)]
+    #[clap(long, value_parser, exclusive(true), display_order = 9)]
     pub revoke_all_tokens: bool,
     /// List token names and their creation dates (cannot show actual tokens)
-    #[clap(long, value_parser, exclusive(true), display_order = 8)]
+    #[clap(long, value_parser, exclusive(true), display_order = 10)]
     pub list_tokens: bool,
     /// The ip address to listen on locally for connections (defaults to 127.0.0.1)
     #[clap(
         long,
         value_parser,
         conflicts_with_all(&["stop", "status", "create-token", "revoke-token", "revoke-all-tokens"]),
-        display_order = 9
+        display_order = 11
     )]
     pub ip: Option<IpAddr>,
     /// The port to listen on locally for connections (defaults to 8082)
@@ -171,7 +177,7 @@ pub struct WebCli {
         long,
         value_parser,
         conflicts_with_all(&["stop", "status", "create-token", "revoke-token", "revoke-all-tokens"]),
-        display_order = 10
+        display_order = 12
     )]
     pub port: Option<u16>,
     /// The path to the SSL certificate (required if not listening on 127.0.0.1)
@@ -179,7 +185,7 @@ pub struct WebCli {
         long,
         value_parser,
         conflicts_with_all(&["stop", "status", "create-token", "revoke-token", "revoke-all-tokens"]),
-        display_order = 11
+        display_order = 13
     )]
     pub cert: Option<PathBuf>,
     /// The path to the SSL key (required if not listening on 127.0.0.1)
@@ -187,7 +193,7 @@ pub struct WebCli {
         long,
         value_parser,
         conflicts_with_all(&["stop", "status", "create-token", "revoke-token", "revoke-all-tokens"]),
-        display_order = 12
+        display_order = 14
     )]
     pub key: Option<PathBuf>,
 }
@@ -198,6 +204,7 @@ impl WebCli {
             || !(self.stop
                 || self.status
                 || self.create_token
+                || self.create_read_only_token
                 || self.revoke_token.is_some()
                 || self.revoke_all_tokens
                 || self.list_tokens)
@@ -388,9 +395,49 @@ pub enum Sessions {
             takes_value(false)
         )]
         stacked: bool,
-        /// Whether to block until this command has finished
+        /// Block until the command has finished and its pane has been closed
         #[clap(long, value_parser, default_value("false"), takes_value(false))]
         blocking: bool,
+
+        /// Block until the command exits successfully (exit status 0) OR its pane has been closed
+        #[clap(
+            long,
+            value_parser,
+            default_value("false"),
+            takes_value(false),
+            conflicts_with("blocking"),
+            conflicts_with("block-until-exit-failure"),
+            conflicts_with("block-until-exit")
+        )]
+        block_until_exit_success: bool,
+
+        /// Block until the command exits with failure (non-zero exit status) OR its pane has been
+        /// closed
+        #[clap(
+            long,
+            value_parser,
+            default_value("false"),
+            takes_value(false),
+            conflicts_with("blocking"),
+            conflicts_with("block-until-exit-success"),
+            conflicts_with("block-until-exit")
+        )]
+        block_until_exit_failure: bool,
+
+        /// Block until the command exits (regardless of exit status) OR its pane has been closed
+        #[clap(
+            long,
+            value_parser,
+            default_value("false"),
+            takes_value(false),
+            conflicts_with("blocking"),
+            conflicts_with("block-until-exit-success"),
+            conflicts_with("block-until-exit-failure")
+        )]
+        block_until_exit: bool,
+        /// if set, will open the pane near the current one rather than following the user's focus
+        #[clap(long)]
+        near_current_pane: bool,
     },
     /// Load a plugin
     #[clap(visible_alias = "p")]
@@ -484,6 +531,9 @@ pub enum Sessions {
         /// Whether to pin a floating pane so that it is always on top
         #[clap(long, requires("floating"))]
         pinned: Option<bool>,
+        /// if set, will open the pane near the current one rather than following the user's focus
+        #[clap(long)]
+        near_current_pane: bool,
     },
     ConvertConfig {
         old_config_file: PathBuf,
@@ -691,6 +741,14 @@ pub enum CliAction {
         stacked: bool,
         #[clap(short, long)]
         blocking: bool,
+
+        // TODO: clean this up
+        #[clap(skip)]
+        unblock_condition: Option<UnblockCondition>,
+
+        /// if set, will open the pane near the current one rather than following the user's focus
+        #[clap(long)]
+        near_current_pane: bool,
     },
     /// Open the specified file in a new zellij pane with your default EDITOR
     Edit {
@@ -738,6 +796,9 @@ pub enum CliAction {
         /// Whether to pin a floating pane so that it is always on top
         #[clap(long, requires("floating"))]
         pinned: Option<bool>,
+        /// if set, will open the pane near the current one rather than following the user's focus
+        #[clap(long)]
+        near_current_pane: bool,
     },
     /// Switch input mode of all connected clients [locked|pane|tab|resize|move|search|session]
     SwitchMode {
@@ -795,6 +856,76 @@ pub enum CliAction {
         /// Change the working directory of the new tab
         #[clap(short, long, value_parser)]
         cwd: Option<PathBuf>,
+
+        /// Optional initial command to run in the new tab
+        #[clap(
+            value_parser,
+            conflicts_with("initial-plugin"),
+            multiple_values(true),
+            takes_value(true),
+            last(true)
+        )]
+        initial_command: Vec<String>,
+
+        /// Initial plugin to load in the new tab
+        #[clap(long, value_parser, conflicts_with("initial-command"))]
+        initial_plugin: Option<String>,
+
+        /// Close the pane immediately when its command exits
+        #[clap(
+            long,
+            value_parser,
+            default_value("false"),
+            takes_value(false),
+            requires("initial-command")
+        )]
+        close_on_exit: bool,
+
+        /// Start the command suspended, only running it after you first press ENTER
+        #[clap(
+            long,
+            value_parser,
+            default_value("false"),
+            takes_value(false),
+            requires("initial-command")
+        )]
+        start_suspended: bool,
+
+        /// Block until the command exits successfully (exit status 0) OR its pane has been closed
+        #[clap(
+            long,
+            value_parser,
+            default_value("false"),
+            takes_value(false),
+            requires("initial-command"),
+            conflicts_with("block-until-exit-failure"),
+            conflicts_with("block-until-exit")
+        )]
+        block_until_exit_success: bool,
+
+        /// Block until the command exits with failure (non-zero exit status) OR its pane has been closed
+        #[clap(
+            long,
+            value_parser,
+            default_value("false"),
+            takes_value(false),
+            requires("initial-command"),
+            conflicts_with("block-until-exit-success"),
+            conflicts_with("block-until-exit")
+        )]
+        block_until_exit_failure: bool,
+
+        /// Block until the command exits (regardless of exit status) OR its pane has been closed
+        #[clap(
+            long,
+            value_parser,
+            default_value("false"),
+            takes_value(false),
+            requires("initial-command"),
+            conflicts_with("block-until-exit-success"),
+            conflicts_with("block-until-exit-failure")
+        )]
+        block_until_exit: bool,
     },
     /// Move the focused tab in the specified direction. [right|left]
     MoveTab {
@@ -802,6 +933,24 @@ pub enum CliAction {
     },
     PreviousSwapLayout,
     NextSwapLayout,
+    /// Override the layout of the active tab
+    OverrideLayout {
+        /// Path to the layout file
+        #[clap(value_parser)]
+        layout: PathBuf,
+
+        /// Default folder to look for layouts
+        #[clap(long, value_parser)]
+        layout_dir: Option<PathBuf>,
+
+        /// Retain existing terminal panes that do not fit in the layout (default: false)
+        #[clap(long, value_parser, takes_value(false), default_value("false"))]
+        retain_existing_terminal_panes: bool,
+
+        /// Retain existing plugin panes that do not fit with the layout default: false)
+        #[clap(long, value_parser, takes_value(false), default_value("false"))]
+        retain_existing_plugin_panes: bool,
+    },
     /// Query all tab names
     QueryTabNames,
     StartOrReloadPlugin {

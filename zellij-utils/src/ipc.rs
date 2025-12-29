@@ -116,6 +116,7 @@ pub enum ClientToServerMsg {
     },
     AttachWatcherClient {
         terminal_size: Size,
+        is_web_client: bool,
     },
     Action {
         action: Action,
@@ -251,18 +252,14 @@ impl<T: Serialize> IpcSenderWithContext<T> {
     pub fn send_client_msg(&mut self, msg: ClientToServerMsg) -> Result<()> {
         let proto_msg: ProtoClientToServerMsg = msg.into();
         write_protobuf_message(&mut self.sender, &proto_msg)?;
-        if let Err(e) = self.sender.flush() {
-            log::error!("Failed to flush ipc sender: {}", e);
-        }
+        let _ = self.sender.flush();
         Ok(())
     }
 
     pub fn send_server_msg(&mut self, msg: ServerToClientMsg) -> Result<()> {
         let proto_msg: ProtoServerToClientMsg = msg.into();
         write_protobuf_message(&mut self.sender, &proto_msg)?;
-        if let Err(e) = self.sender.flush() {
-            log::error!("Failed to flush ipc sender: {}", e);
-        }
+        let _ = self.sender.flush();
         Ok(())
     }
 
@@ -305,10 +302,7 @@ where
                     None
                 },
             },
-            Err(e) => {
-                warn!("Error in protobuf IpcReceiver.recv_client_msg(): {:?}", e);
-                None
-            },
+            Err(_e) => None,
         }
     }
 
@@ -321,10 +315,7 @@ where
                     None
                 },
             },
-            Err(e) => {
-                warn!("Error in protobuf IpcReceiver.recv_server_msg(): {:?}", e);
-                None
-            },
+            Err(_e) => None,
         }
     }
 
@@ -370,9 +361,7 @@ pub fn send_protobuf_client_to_server(
 ) -> Result<()> {
     let proto_msg: ProtoClientToServerMsg = msg.into();
     write_protobuf_message(&mut sender.sender, &proto_msg)?;
-    if let Err(e) = sender.sender.flush() {
-        log::error!("Failed to flush ipc sender: {}", e);
-    }
+    let _ = sender.sender.flush();
     Ok(())
 }
 
@@ -382,9 +371,7 @@ pub fn send_protobuf_server_to_client(
 ) -> Result<()> {
     let proto_msg: ProtoServerToClientMsg = msg.into();
     write_protobuf_message(&mut sender.sender, &proto_msg)?;
-    if let Err(e) = sender.sender.flush() {
-        log::error!("Failed to flush ipc sender: {}", e);
-    }
+    let _ = sender.sender.flush();
     Ok(())
 }
 
@@ -399,10 +386,7 @@ pub fn recv_protobuf_client_to_server(
                 None
             },
         },
-        Err(e) => {
-            warn!("Error reading protobuf message: {:?}", e);
-            None
-        },
+        Err(_e) => None,
     }
 }
 
@@ -417,9 +401,6 @@ pub fn recv_protobuf_server_to_client(
                 None
             },
         },
-        Err(e) => {
-            warn!("Error reading protobuf message: {:?}", e);
-            None
-        },
+        Err(_e) => None,
     }
 }

@@ -30,15 +30,19 @@ use wasm_bridge::WasmBridge;
 use async_std::{channel, future::timeout, task};
 use zellij_utils::{
     data::{
-        ClientInfo, Event, EventType, FloatingPaneCoordinates, InputMode, MessageToPlugin,
-        PermissionStatus, PermissionType, PipeMessage, PipeSource, PluginCapabilities,
-        WebServerStatus,
+        ClientInfo, CommandOrPlugin, Event, EventType, FloatingPaneCoordinates, InputMode,
+        MessageToPlugin, PermissionStatus, PermissionType, PipeMessage, PipeSource,
+        PluginCapabilities, WebServerStatus,
     },
     errors::{prelude::*, ContextType, PluginContext},
     input::{
+        actions::Action,
         command::TerminalAction,
         keybinds::Keybinds,
-        layout::{FloatingPaneLayout, Layout, Run, RunPlugin, RunPluginOrAlias, TiledPaneLayout},
+        layout::{
+            FloatingPaneLayout, Layout, Run, RunPlugin, RunPluginOrAlias, SwapFloatingLayout,
+            SwapTiledLayout, TiledPaneLayout,
+        },
         plugins::PluginAliases,
     },
     ipc::ClientAttributes,
@@ -86,10 +90,25 @@ pub enum PluginInstruction {
         Option<TerminalAction>,
         Option<TiledPaneLayout>,
         Vec<FloatingPaneLayout>,
-        usize,                   // tab_index
-        bool,                    // should change focus to new tab
-        (ClientId, bool),        // bool -> is_web_client
-        Option<NotificationEnd>, // completion signal
+        usize,                        // tab_index
+        Option<Vec<CommandOrPlugin>>, // initial_panes
+        bool,                         // block_on_first_terminal
+        bool,                         // should change focus to new tab
+        (ClientId, bool),             // bool -> is_web_client
+        Option<NotificationEnd>,      // completion signal
+    ),
+    OverrideLayout(
+        Option<PathBuf>,        // cwd
+        Option<TerminalAction>, // default_shell
+        TiledPaneLayout,
+        Vec<FloatingPaneLayout>,
+        Option<Vec<SwapTiledLayout>>,
+        Option<Vec<SwapFloatingLayout>>,
+        bool,  // retain_existing_terminal_panes
+        bool,  // retain_existing_plugin_panes
+        usize, // tab_index
+        ClientId,
+        Option<NotificationEnd>,
     ),
     ApplyCachedEvents {
         plugin_ids: Vec<PluginId>,
@@ -175,6 +194,12 @@ pub enum PluginInstruction {
     WebServerStarted(String), // String -> the base url of the web server
     FailedToStartWebServer(String),
     PaneRenderReport(PaneRenderReport),
+    UserInput {
+        client_id: ClientId,
+        action: Action,
+        terminal_id: Option<u32>,
+        cli_client_id: Option<ClientId>,
+    },
     Exit,
 }
 
@@ -192,6 +217,7 @@ impl From<&PluginInstruction> for PluginContext {
             PluginInstruction::AddClient(_) => PluginContext::AddClient,
             PluginInstruction::RemoveClient(_) => PluginContext::RemoveClient,
             PluginInstruction::NewTab(..) => PluginContext::NewTab,
+            PluginInstruction::OverrideLayout(..) => PluginContext::OverrideLayout,
             PluginInstruction::ApplyCachedEvents { .. } => PluginContext::ApplyCachedEvents,
             PluginInstruction::ApplyCachedWorkerMessages(..) => {
                 PluginContext::ApplyCachedWorkerMessages
@@ -225,6 +251,7 @@ impl From<&PluginInstruction> for PluginContext {
             PluginInstruction::WebServerStarted(..) => PluginContext::WebServerStarted,
             PluginInstruction::FailedToStartWebServer(..) => PluginContext::FailedToStartWebServer,
             PluginInstruction::PaneRenderReport(..) => PluginContext::PaneRenderReport,
+            PluginInstruction::UserInput { .. } => PluginContext::UserInput,
         }
     }
 }
@@ -453,6 +480,8 @@ pub(crate) fn plugin_thread_main(
                 mut tab_layout,
                 mut floating_panes_layout,
                 tab_index,
+                initial_panes,
+                block_on_first_terminal,
                 should_change_focus_to_new_tab,
                 (client_id, is_web_client),
                 completion_tx,
@@ -469,6 +498,26 @@ pub(crate) fn plugin_thread_main(
 
                 let mut plugin_ids: HashMap<RunPluginOrAlias, Vec<PluginId>> = HashMap::new();
                 tab_layout = tab_layout.or_else(|| Some(layout.new_tab().0));
+
+                // Match initial_panes plugins to empty slots in the layout
+                if let Some(ref initial_panes_vec) = initial_panes {
+                    if let Some(ref mut tiled_layout) = tab_layout {
+                        for initial_pane in initial_panes_vec.iter() {
+                            if let CommandOrPlugin::Plugin(run_plugin_or_alias) = initial_pane {
+                                if !tiled_layout.replace_next_empty_slot_with_run(Run::Plugin(
+                                    run_plugin_or_alias.clone(),
+                                )) {
+                                    log::warn!(
+                                        "More initial_panes provided than empty slots available"
+                                    );
+                                    break;
+                                }
+                            }
+                            // Skip CommandOrPlugin::Command entries (handled by pty thread)
+                        }
+                    }
+                }
+
                 tab_layout.as_mut().map(|t| {
                     t.populate_plugin_aliases_in_layout(&plugin_aliases);
                     if let Some(cwd) = cwd.as_ref() {
@@ -481,7 +530,7 @@ pub(crate) fn plugin_thread_main(
                         .as_mut()
                         .map(|f| f.populate_run_plugin_if_needed(&plugin_aliases));
                 });
-                let mut extracted_run_instructions = tab_layout
+                let extracted_run_instructions = tab_layout
                     .clone()
                     .unwrap_or_else(|| layout.new_tab().0)
                     .extract_run_instructions();
@@ -496,26 +545,34 @@ pub(crate) fn plugin_thread_main(
                     .filter(|f| !f.already_running)
                     .map(|f| f.run.clone())
                     .collect();
-                extracted_run_instructions.append(&mut extracted_floating_plugins);
-                for run_instruction in extracted_run_instructions {
+                let mut all_run_instructions = extracted_run_instructions;
+                all_run_instructions.append(&mut extracted_floating_plugins);
+
+                for run_instruction in all_run_instructions {
                     if let Some(Run::Plugin(run_plugin_or_alias)) = run_instruction {
                         let run_plugin = run_plugin_or_alias.get_run_plugin();
                         let cwd = run_plugin_or_alias
                             .get_initial_cwd()
                             .or_else(|| cwd.clone());
                         let skip_cache = false;
-                        let (plugin_id, _client_id) = wasm_bridge.load_plugin(
+                        match wasm_bridge.load_plugin(
                             &run_plugin,
                             Some(tab_index),
                             size,
                             cwd,
                             skip_cache,
                             Some(client_id),
-                        )?;
-                        plugin_ids
-                            .entry(run_plugin_or_alias.clone())
-                            .or_default()
-                            .push(plugin_id);
+                        ) {
+                            Ok((plugin_id, _client_id)) => {
+                                plugin_ids
+                                    .entry(run_plugin_or_alias.clone())
+                                    .or_default()
+                                    .push(plugin_id);
+                            },
+                            Err(e) => {
+                                log::error!("Failed to load plugin: {}", e);
+                            },
+                        }
                     }
                 }
                 drop(bus.senders.send_to_pty(PtyInstruction::NewTab(
@@ -525,8 +582,100 @@ pub(crate) fn plugin_thread_main(
                     floating_panes_layout,
                     tab_index,
                     plugin_ids,
+                    initial_panes,
+                    block_on_first_terminal,
                     should_change_focus_to_new_tab,
                     (client_id, is_web_client),
+                    completion_tx,
+                )));
+            },
+            PluginInstruction::OverrideLayout(
+                cwd,
+                default_shell,
+                mut tiled_layout,
+                mut floating_layouts,
+                swap_tiled_layouts,
+                swap_floating_layouts,
+                retain_existing_terminal_panes,
+                retain_existing_plugin_panes,
+                tab_index,
+                client_id,
+                completion_tx,
+            ) => {
+                // Prefer connected clients to avoid opening plugins in background for CLI clients
+                let client_id = if wasm_bridge.client_is_connected(&client_id) {
+                    client_id
+                } else if let Some(first_client_id) = wasm_bridge.get_first_client_id() {
+                    first_client_id
+                } else {
+                    client_id
+                };
+
+                let mut plugin_ids: HashMap<RunPluginOrAlias, Vec<PluginId>> = HashMap::new();
+
+                // Populate plugin aliases in layouts
+                tiled_layout.populate_plugin_aliases_in_layout(&plugin_aliases);
+                floating_layouts.iter_mut().for_each(|f| {
+                    f.run
+                        .as_mut()
+                        .map(|f| f.populate_run_plugin_if_needed(&plugin_aliases));
+                });
+
+                // Extract run instructions from tiled layout
+                let extracted_run_instructions = tiled_layout.extract_run_instructions();
+
+                // Extract run instructions from floating layouts (excluding already_running)
+                let extracted_floating_plugins: Vec<Option<Run>> = floating_layouts
+                    .iter()
+                    .filter(|f| !f.already_running)
+                    .map(|f| f.run.clone())
+                    .collect();
+
+                // Combine all run instructions
+                let mut all_run_instructions = extracted_run_instructions;
+                all_run_instructions.extend(extracted_floating_plugins);
+
+                // Load plugins for all Run::Plugin instructions
+                let size = Size::default();
+                for run_instruction in all_run_instructions {
+                    if let Some(Run::Plugin(run_plugin_or_alias)) = run_instruction {
+                        let run_plugin = run_plugin_or_alias.get_run_plugin();
+                        let cwd = run_plugin_or_alias.get_initial_cwd();
+                        let skip_cache = false;
+                        match wasm_bridge.load_plugin(
+                            &run_plugin,
+                            Some(tab_index),
+                            size,
+                            cwd,
+                            skip_cache,
+                            Some(client_id),
+                        ) {
+                            Ok((plugin_id, _client_id)) => {
+                                plugin_ids
+                                    .entry(run_plugin_or_alias.clone())
+                                    .or_default()
+                                    .push(plugin_id);
+                            },
+                            Err(e) => {
+                                log::error!("Failed to load plugin: {}", e);
+                            },
+                        }
+                    }
+                }
+
+                // Send to pty thread
+                drop(bus.senders.send_to_pty(PtyInstruction::OverrideLayout(
+                    cwd,
+                    default_shell,
+                    tiled_layout,
+                    floating_layouts,
+                    swap_tiled_layouts,
+                    swap_floating_layouts,
+                    retain_existing_terminal_panes,
+                    retain_existing_plugin_panes,
+                    tab_index,
+                    plugin_ids,
+                    client_id,
                     completion_tx,
                 )));
             },
@@ -988,6 +1137,20 @@ pub(crate) fn plugin_thread_main(
                 wasm_bridge
                     .handle_pane_render_report(pane_render_report, shutdown_send.clone())
                     .non_fatal();
+            },
+            PluginInstruction::UserInput {
+                client_id,
+                action,
+                terminal_id,
+                cli_client_id,
+            } => {
+                // Fire Event::UserAction to all subscribed plugins with InterceptInput permission
+                let updates = vec![(
+                    None,
+                    None,
+                    Event::UserAction(action, client_id, terminal_id, cli_client_id),
+                )];
+                wasm_bridge.update_plugins(updates, shutdown_send.clone())?;
             },
             PluginInstruction::Exit => {
                 break;
