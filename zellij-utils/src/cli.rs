@@ -808,6 +808,10 @@ pub enum CliAction {
     TogglePaneEmbedOrFloating,
     /// Toggle the visibility of all floating panes in the current Tab, open one if none exist
     ToggleFloatingPanes,
+    /// Hide all floating panes in the current Tab
+    HideFloatingPanes,
+    /// Show all floating panes in the current Tab, open one if none exist
+    ShowFloatingPanes,
     /// Close the focused pane.
     ClosePane,
     /// Renames the focused pane

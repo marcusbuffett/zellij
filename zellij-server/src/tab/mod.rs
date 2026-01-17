@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use uuid::Uuid;
 use zellij_utils::data::PaneContents;
 use zellij_utils::data::{
-    Direction, KeyWithModifier, NewPanePlacement, PaneInfo, PermissionStatus, PermissionType,
+    Direction, FileToOpen, KeyWithModifier, NewPanePlacement, PaneInfo, PermissionStatus, PermissionType,
     PluginPermission, ResizeStrategy, WebSharing,
 };
 use zellij_utils::errors::prelude::*;
@@ -1377,6 +1377,61 @@ impl Tab {
         } else {
             invoked_with
         }
+    }
+    pub fn hide_floating_panes_with_params(
+        &mut self,
+        _client_id: Option<ClientId>,
+        _default_shell: Option<TerminalAction>,
+        _completion_tx: Option<NotificationEnd>,
+    ) -> Result<()> {
+        self.hide_floating_panes();
+        self.set_force_render();
+        Ok(())
+    }
+    pub fn show_floating_panes_with_params(
+        &mut self,
+        client_id: Option<ClientId>,
+        default_shell: Option<TerminalAction>,
+        completion_tx: Option<NotificationEnd>,
+    ) -> Result<()> {
+        self.show_floating_panes();
+        match self.floating_panes.last_selectable_floating_pane_id() {
+            Some(last_selectable_floating_pane_id) => match client_id {
+                Some(client_id) => {
+                    if !self.floating_panes.active_panes_contain(&client_id) {
+                        self.floating_panes
+                            .focus_pane(last_selectable_floating_pane_id, client_id);
+                    }
+                },
+                None => {
+                    self.floating_panes
+                        .focus_pane_for_all_clients(last_selectable_floating_pane_id);
+                },
+            },
+            None => {
+                let name = None;
+                let client_id_or_tab_index = match client_id {
+                    Some(client_id) => ClientTabIndexOrPaneId::ClientId(client_id),
+                    None => ClientTabIndexOrPaneId::TabIndex(self.index),
+                };
+                let should_start_suppressed = false;
+                let instruction = PtyInstruction::SpawnTerminal(
+                    default_shell,
+                    name,
+                    NewPanePlacement::Floating(None),
+                    should_start_suppressed,
+                    client_id_or_tab_index,
+                    completion_tx,
+                    false, // set_blocking
+                );
+                self.senders
+                    .send_to_pty(instruction)
+                    .with_context(|| format!("failed to open a floating pane for client"))?;
+            },
+        }
+        self.floating_panes.set_force_render();
+        self.set_force_render();
+        Ok(())
     }
     pub fn new_pane(
         &mut self,
@@ -3190,7 +3245,12 @@ impl Tab {
             self.switch_next_pane_fullscreen(client_id);
             return;
         }
-        self.tiled_panes.focus_next_pane(client_id);
+        // Check if floating panes are visible and cycle through them instead
+        if self.are_floating_panes_visible() {
+            self.floating_panes.focus_next_pane(client_id);
+        } else {
+            self.tiled_panes.focus_next_pane(client_id);
+        }
     }
     pub fn focus_previous_pane(&mut self, client_id: ClientId) {
         if !self.has_selectable_panes() {
@@ -3200,7 +3260,12 @@ impl Tab {
             self.switch_prev_pane_fullscreen(client_id);
             return;
         }
-        self.tiled_panes.focus_previous_pane(client_id);
+        // Check if floating panes are visible and cycle through them instead
+        if self.are_floating_panes_visible() {
+            self.floating_panes.focus_previous_pane(client_id);
+        } else {
+            self.tiled_panes.focus_previous_pane(client_id);
+        }
     }
     pub fn focus_pane_on_edge(&mut self, direction: Direction, client_id: ClientId) {
         if self.floating_panes.panes_are_visible() {

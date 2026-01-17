@@ -732,10 +732,11 @@ impl From<crate::input::actions::Action>
             SearchToggleOptionAction, SkipConfirmAction, StackPanesAction,
             StartOrReloadPluginAction, SwitchFocusAction, SwitchModeForAllClientsAction,
             SwitchSessionAction, SwitchToModeAction, TabNameInputAction, ToggleActiveSyncTabAction,
-            ToggleFloatingPanesAction, ToggleFocusFullscreenAction, ToggleGroupMarkingAction,
-            ToggleMouseModeAction, TogglePaneEmbedOrFloatingAction, TogglePaneFramesAction,
-            TogglePaneInGroupAction, TogglePanePinnedAction, ToggleTabAction, UndoRenamePaneAction,
-            UndoRenameTabAction, WriteAction, WriteCharsAction,
+            ToggleFloatingPanesAction, HideFloatingPanesAction, ShowFloatingPanesAction,
+            ToggleFocusFullscreenAction, ToggleGroupMarkingAction, ToggleMouseModeAction,
+            TogglePaneEmbedOrFloatingAction, TogglePaneFramesAction, TogglePaneInGroupAction,
+            TogglePanePinnedAction, ToggleTabAction, UndoRenamePaneAction, UndoRenameTabAction,
+            WriteAction, WriteCharsAction,
         };
         use std::collections::HashMap;
 
@@ -942,6 +943,12 @@ impl From<crate::input::actions::Action>
             },
             crate::input::actions::Action::ToggleFloatingPanes => {
                 ActionType::ToggleFloatingPanes(ToggleFloatingPanesAction {})
+            },
+            crate::input::actions::Action::HideFloatingPanes => {
+                ActionType::HideFloatingPanes(HideFloatingPanesAction {})
+            },
+            crate::input::actions::Action::ShowFloatingPanes => {
+                ActionType::ShowFloatingPanes(ShowFloatingPanesAction {})
             },
             crate::input::actions::Action::CloseFocus => {
                 ActionType::CloseFocus(CloseFocusAction {})
@@ -1514,6 +1521,12 @@ impl TryFrom<crate::client_server_contract::client_server_contract::Action>
             },
             ActionType::ToggleFloatingPanes(_) => {
                 Ok(crate::input::actions::Action::ToggleFloatingPanes)
+            },
+            ActionType::HideFloatingPanes(_) => {
+                Ok(crate::input::actions::Action::HideFloatingPanes)
+            },
+            ActionType::ShowFloatingPanes(_) => {
+                Ok(crate::input::actions::Action::ShowFloatingPanes)
             },
             ActionType::CloseFocus(_) => Ok(crate::input::actions::Action::CloseFocus),
             ActionType::PaneNameInput(pane_name_action) => {

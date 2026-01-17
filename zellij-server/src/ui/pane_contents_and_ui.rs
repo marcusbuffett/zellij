@@ -268,7 +268,7 @@ impl<'a> PaneContentsAndUi<'a> {
 
         if let Some((frame_terminal_characters, vte_output)) = self
             .pane
-            .render_frame(client_id, frame_params, client_mode, self.style.colors)
+            .render_frame(client_id, frame_params, client_mode, self.style.colors.into())
             .with_context(err_context)?
         {
             self.output
@@ -324,7 +324,19 @@ impl<'a> PaneContentsAndUi<'a> {
             Some((self.style.colors.frame_highlight.emphasis_1, 3))
         } else if pane_focused_for_client_id {
             match mode {
-                InputMode::Normal | InputMode::Locked => {
+                InputMode::Normal => {
+                    if session_is_mirrored || !self.multiple_users_exist_in_session {
+                        Some((self.style.colors.frame_selected.base, 3))
+                    } else {
+                        let colors = client_id_to_colors(
+                            client_id,
+                            self.style.colors.multiplayer_user_colors,
+                        );
+                        colors.map(|colors| (colors.0, 3))
+                    }
+                },
+                InputMode::Locked => {
+                    // In locked mode, focused pane gets white/bright outline
                     if session_is_mirrored || !self.multiple_users_exist_in_session {
                         Some((self.style.colors.frame_selected.base, 3))
                     } else {
@@ -343,10 +355,27 @@ impl<'a> PaneContentsAndUi<'a> {
         {
             Some((self.style.colors.frame_highlight.base, 1))
         } else {
-            self.style
-                .colors
-                .frame_unselected
-                .map(|frame| (frame.base, 0))
+            // Handle unfocused panes - dim them in locked mode
+            match mode {
+                InputMode::Locked => {
+                    // In locked mode, unfocused panes get dimmed outline
+                    self.style
+                        .colors
+                        .frame_unselected
+                        .map(|frame| (frame.base, 0))
+                        .or_else(|| {
+                            // If frame_unselected is not defined, use a dimmed version of frame_selected
+                            Some((self.style.colors.frame_selected.base, 0))
+                        })
+                },
+                _ => {
+                    // Normal behavior for unfocused panes
+                    self.style
+                        .colors
+                        .frame_unselected
+                        .map(|frame| (frame.base, 0))
+                }
+            }
         }
     }
 }

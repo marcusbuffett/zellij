@@ -61,6 +61,8 @@ macro_rules! parse_kdl_action_arguments {
                 "ToggleActiveSyncTab" => Ok(Action::ToggleActiveSyncTab),
                 "TogglePaneEmbedOrFloating" => Ok(Action::TogglePaneEmbedOrFloating),
                 "ToggleFloatingPanes" => Ok(Action::ToggleFloatingPanes),
+                "HideFloatingPanes" => Ok(Action::HideFloatingPanes),
+                "ShowFloatingPanes" => Ok(Action::ShowFloatingPanes),
                 "CloseFocus" => Ok(Action::CloseFocus),
                 "UndoRenamePane" => Ok(Action::UndoRenamePane),
                 "NoOp" => Ok(Action::NoOp),
@@ -726,6 +728,8 @@ impl Action {
             },
             Action::TogglePaneEmbedOrFloating => Some(KdlNode::new("TogglePaneEmbedOrFloating")),
             Action::ToggleFloatingPanes => Some(KdlNode::new("ToggleFloatingPanes")),
+            Action::HideFloatingPanes => Some(KdlNode::new("HideFloatingPanes")),
+            Action::ShowFloatingPanes => Some(KdlNode::new("ShowFloatingPanes")),
             Action::CloseFocus => Some(KdlNode::new("CloseFocus")),
             Action::PaneNameInput { input: bytes } => {
                 let mut node = KdlNode::new("PaneNameInput");
@@ -1484,6 +1488,12 @@ impl TryFrom<(&KdlNode, &Options)> for Action {
                 parse_kdl_action_arguments!(action_name, action_arguments, kdl_action)
             },
             "ToggleFloatingPanes" => {
+                parse_kdl_action_arguments!(action_name, action_arguments, kdl_action)
+            },
+            "HideFloatingPanes" => {
+                parse_kdl_action_arguments!(action_name, action_arguments, kdl_action)
+            },
+            "ShowFloatingPanes" => {
                 parse_kdl_action_arguments!(action_name, action_arguments, kdl_action)
             },
             "CloseFocus" => parse_kdl_action_arguments!(action_name, action_arguments, kdl_action),

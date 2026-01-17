@@ -163,6 +163,8 @@ pub enum ScreenInstruction {
     OpenInPlaceEditor(PaneId, ClientTabIndexOrPaneId),
     TogglePaneEmbedOrFloating(ClientId, Option<NotificationEnd>),
     ToggleFloatingPanes(ClientId, Option<TerminalAction>, Option<NotificationEnd>),
+    HideFloatingPanes(ClientId, Option<TerminalAction>, Option<NotificationEnd>),
+    ShowFloatingPanes(ClientId, Option<TerminalAction>, Option<NotificationEnd>),
     WriteCharacter(
         Option<KeyWithModifier>,
         Vec<u8>,
@@ -516,6 +518,8 @@ impl From<&ScreenInstruction> for ScreenContext {
                 ScreenContext::TogglePaneEmbedOrFloating
             },
             ScreenInstruction::ToggleFloatingPanes(..) => ScreenContext::ToggleFloatingPanes,
+            ScreenInstruction::HideFloatingPanes(..) => ScreenContext::HideFloatingPanes,
+            ScreenInstruction::ShowFloatingPanes(..) => ScreenContext::ShowFloatingPanes,
             ScreenInstruction::WriteCharacter(..) => ScreenContext::WriteCharacter,
             ScreenInstruction::Resize(.., strategy, _) => match strategy {
                 ResizeStrategy {
@@ -3925,6 +3929,20 @@ pub(crate) fn screen_thread_main(
             ScreenInstruction::ToggleFloatingPanes(client_id, default_shell, completion_tx) => {
                 active_tab_and_connected_client_id!(screen, client_id, |tab: &mut Tab, client_id: ClientId| tab
                     .toggle_floating_panes(Some(client_id), default_shell, completion_tx), ?);
+                screen.log_and_report_session_state()?;
+
+                screen.render(None)?;
+            },
+            ScreenInstruction::HideFloatingPanes(client_id, default_shell, completion_tx) => {
+                active_tab_and_connected_client_id!(screen, client_id, |tab: &mut Tab, client_id: ClientId| tab
+                    .hide_floating_panes_with_params(Some(client_id), default_shell, completion_tx), ?);
+                screen.log_and_report_session_state()?;
+
+                screen.render(None)?;
+            },
+            ScreenInstruction::ShowFloatingPanes(client_id, default_shell, completion_tx) => {
+                active_tab_and_connected_client_id!(screen, client_id, |tab: &mut Tab, client_id: ClientId| tab
+                    .show_floating_panes_with_params(Some(client_id), default_shell, completion_tx), ?);
                 screen.log_and_report_session_state()?;
 
                 screen.render(None)?;

@@ -385,6 +385,8 @@ enum ActionName {
     NewTiledPane = 32;
     TogglePaneEmbedOrFloating = 33;
     ToggleFloatingPanes = 34;
+    HideFloatingPanes = 114;
+    ShowFloatingPanes = 115;
     CloseFocus = 35;
     PaneNameInput = 36;
     UndoRenamePane = 37;

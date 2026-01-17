@@ -794,6 +794,24 @@ pub(crate) fn route_action(
                 ))
                 .with_context(err_context)?;
         },
+        Action::HideFloatingPanes => {
+            senders
+                .send_to_screen(ScreenInstruction::HideFloatingPanes(
+                    client_id,
+                    default_shell.clone(),
+                    Some(NotificationEnd::new(completion_tx)),
+                ))
+                .with_context(err_context)?;
+        },
+        Action::ShowFloatingPanes => {
+            senders
+                .send_to_screen(ScreenInstruction::ShowFloatingPanes(
+                    client_id,
+                    default_shell.clone(),
+                    Some(NotificationEnd::new(completion_tx)),
+                ))
+                .with_context(err_context)?;
+        },
         Action::PaneNameInput { input } => {
             senders
                 .send_to_screen(ScreenInstruction::UpdatePaneName(

@@ -903,6 +903,92 @@ impl FloatingPanes {
             },
         }
     }
+    pub fn focus_next_pane(&mut self, client_id: ClientId) {
+        let display_area = *self.display_area.borrow();
+        let viewport = *self.viewport.borrow();
+        let active_pane_id = self.active_panes.get(&client_id).copied();
+        
+        if let Some(active_pane_id) = active_pane_id {
+            let floating_pane_grid = FloatingPaneGrid::new(
+                &mut self.panes,
+                &mut self.desired_pane_positions,
+                display_area,
+                viewport,
+            );
+            
+            // First try to go right
+            let next_pane_right = floating_pane_grid.next_selectable_pane_id_to_the_right(&active_pane_id);
+            
+            let next_pane_id = if let Some(next_pane_id) = next_pane_right {
+                Some(next_pane_id)
+            } else {
+                // If we can't go right, wrap to the leftmost pane
+                self.get_leftmost_selectable_pane_id()
+            };
+            
+            if let Some(next_pane_id) = next_pane_id {
+                // Only focus if it's different from the current active pane
+                if next_pane_id != active_pane_id {
+                    self.focus_pane(next_pane_id, client_id);
+                }
+            }
+        } else {
+            // No active pane, focus the leftmost pane
+            if let Some(leftmost_pane_id) = self.get_leftmost_selectable_pane_id() {
+                self.focus_pane(leftmost_pane_id, client_id);
+            }
+        }
+    }
+    pub fn focus_previous_pane(&mut self, client_id: ClientId) {
+        let display_area = *self.display_area.borrow();
+        let viewport = *self.viewport.borrow();
+        let active_pane_id = self.active_panes.get(&client_id).copied();
+        
+        if let Some(active_pane_id) = active_pane_id {
+            let floating_pane_grid = FloatingPaneGrid::new(
+                &mut self.panes,
+                &mut self.desired_pane_positions,
+                display_area,
+                viewport,
+            );
+            
+            // First try to go left
+            let next_pane_left = floating_pane_grid.next_selectable_pane_id_to_the_left(&active_pane_id);
+            
+            let next_pane_id = if let Some(next_pane_id) = next_pane_left {
+                Some(next_pane_id)
+            } else {
+                // If we can't go left, wrap to the rightmost pane
+                self.get_rightmost_selectable_pane_id()
+            };
+            
+            if let Some(next_pane_id) = next_pane_id {
+                // Only focus if it's different from the current active pane
+                if next_pane_id != active_pane_id {
+                    self.focus_pane(next_pane_id, client_id);
+                }
+            }
+        } else {
+            // No active pane, focus the rightmost pane
+            if let Some(rightmost_pane_id) = self.get_rightmost_selectable_pane_id() {
+                self.focus_pane(rightmost_pane_id, client_id);
+            }
+        }
+    }
+    fn get_leftmost_selectable_pane_id(&self) -> Option<PaneId> {
+        self.panes
+            .iter()
+            .filter(|(_, pane)| pane.selectable())
+            .min_by_key(|(_, pane)| pane.position_and_size().x)
+            .map(|(pane_id, _)| *pane_id)
+    }
+    fn get_rightmost_selectable_pane_id(&self) -> Option<PaneId> {
+        self.panes
+            .iter()
+            .filter(|(_, pane)| pane.selectable())
+            .max_by_key(|(_, pane)| pane.position_and_size().x)
+            .map(|(pane_id, _)| *pane_id)
+    }
     pub fn defocus_pane(&mut self, client_id: ClientId) {
         self.active_panes.remove(&client_id, &mut self.panes);
         self.set_force_render();

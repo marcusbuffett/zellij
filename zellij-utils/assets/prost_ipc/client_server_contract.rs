@@ -203,6 +203,10 @@ pub mod action {
         TogglePaneEmbedOrFloating(super::TogglePaneEmbedOrFloatingAction),
         #[prost(message, tag="38")]
         ToggleFloatingPanes(super::ToggleFloatingPanesAction),
+        #[prost(message, tag="118")]
+        HideFloatingPanes(super::HideFloatingPanesAction),
+        #[prost(message, tag="119")]
+        ShowFloatingPanes(super::ShowFloatingPanesAction),
         #[prost(message, tag="39")]
         CloseFocus(super::CloseFocusAction),
         #[prost(message, tag="40")]
@@ -403,6 +407,14 @@ pub struct TogglePaneEmbedOrFloatingAction {
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ToggleFloatingPanesAction {
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct HideFloatingPanesAction {
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ShowFloatingPanesAction {
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]

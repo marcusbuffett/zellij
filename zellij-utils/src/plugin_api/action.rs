@@ -391,6 +391,18 @@ impl TryFrom<ProtobufAction> for Action {
                     None => Ok(Action::ToggleFloatingPanes),
                 }
             },
+            Some(ProtobufActionName::HideFloatingPanes) => {
+                match protobuf_action.optional_payload {
+                    Some(_) => Err("HideFloatingPanes should not have a payload"),
+                    None => Ok(Action::HideFloatingPanes),
+                }
+            },
+            Some(ProtobufActionName::ShowFloatingPanes) => {
+                match protobuf_action.optional_payload {
+                    Some(_) => Err("ShowFloatingPanes should not have a payload"),
+                    None => Ok(Action::ShowFloatingPanes),
+                }
+            },
             Some(ProtobufActionName::CloseFocus) => match protobuf_action.optional_payload {
                 Some(_) => Err("CloseFocus should not have a payload"),
                 None => Ok(Action::CloseFocus),
@@ -1316,6 +1328,14 @@ impl TryFrom<Action> for ProtobufAction {
             }),
             Action::ToggleFloatingPanes => Ok(ProtobufAction {
                 name: ProtobufActionName::ToggleFloatingPanes as i32,
+                optional_payload: None,
+            }),
+            Action::HideFloatingPanes => Ok(ProtobufAction {
+                name: ProtobufActionName::HideFloatingPanes as i32,
+                optional_payload: None,
+            }),
+            Action::ShowFloatingPanes => Ok(ProtobufAction {
+                name: ProtobufActionName::ShowFloatingPanes as i32,
                 optional_payload: None,
             }),
             Action::CloseFocus => Ok(ProtobufAction {
