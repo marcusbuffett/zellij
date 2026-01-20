@@ -78,6 +78,14 @@ pub struct CliArgs {
     /// Specify emitting additional debug information
     #[clap(short, long, value_parser)]
     pub debug: bool,
+
+    /// Terminal width (columns) for detached sessions. Defaults to 80 if not specified.
+    #[clap(long, value_parser)]
+    pub width: Option<usize>,
+
+    /// Terminal height (rows) for detached sessions. Defaults to 24 if not specified.
+    #[clap(long, value_parser)]
+    pub height: Option<usize>,
 }
 
 impl CliArgs {

@@ -1111,6 +1111,12 @@ pub fn start_server_detached(
 
     let should_start_web_server = config_options.web_server.map(|w| w).unwrap_or(false);
 
+    // Use CLI-provided dimensions or default to reasonable values for detached sessions
+    let terminal_window_size = Size {
+        cols: cli_args.width.unwrap_or(80),
+        rows: cli_args.height.unwrap_or(24),
+    };
+
     let create_ipc_pipe = || -> std::path::PathBuf {
         let mut sock_dir = ZELLIJ_SOCK_DIR.clone();
         std::fs::create_dir_all(&sock_dir).unwrap();
@@ -1129,8 +1135,7 @@ pub fn start_server_detached(
                 should_ignore_config: cli_args.is_setup_clean(),
                 configuration_options: Some(config_options.clone()),
                 layout: Some(LayoutInfo::File(path_to_layout.display().to_string())),
-                terminal_window_size: Size { cols: 50, rows: 50 }, // static number until a
-                // client connects
+                terminal_window_size,
                 data_dir: cli_args.data_dir.clone(),
                 is_debug: cli_args.debug,
                 max_panes: cli_args.max_panes,
@@ -1180,8 +1185,7 @@ pub fn start_server_detached(
                             )
                         })
                 }),
-                terminal_window_size: Size { cols: 50, rows: 50 }, // static number until a
-                // client connects
+                terminal_window_size,
                 data_dir: cli_args.data_dir.clone(),
                 is_debug: cli_args.debug,
                 max_panes: cli_args.max_panes,
